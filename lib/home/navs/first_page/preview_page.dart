@@ -10,7 +10,6 @@ import 'package:http/http.dart' as http;
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:lottie/lottie.dart';
 import 'package:marquee/marquee.dart';
-import 'package:mrdb/constens/all_color.dart';
 import 'package:mrdb/constens/keys.dart';
 import 'package:mrdb/home/bottom_nav.dart';
 import 'package:mrdb/home/navs/about.dart';
@@ -18,6 +17,7 @@ import 'package:pretty_animated_text/pretty_animated_text.dart';
 import 'package:provider/provider.dart';
 import 'package:readmore/readmore.dart';
 import 'package:shimmer/shimmer.dart';
+import '../../../constens/all_colors.dart';
 import '../../../main.dart';
 import '../../../models/movie_model.dart';
 import '../../../provider/client.dart';
@@ -1077,7 +1077,7 @@ class _MoviePreviewState extends State<MoviePreview> {
                           shrinkWrap: true,
                           itemCount: reviews.length,
                           itemBuilder: (context, index) {
-                            var review =reviews[index];
+                            var review = reviews[index];
                             var profile =review['author_details']['avatar_path'];
                             String name=review['author'];
                             Map<String, Color>? circleColor=AllLettersColors.colorsAZ[name[0].toUpperCase()];

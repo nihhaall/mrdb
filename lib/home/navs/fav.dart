@@ -1,14 +1,13 @@
 import 'package:amicons/amicons.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mrdb/home/bottom_nav.dart';
+import 'package:mrdb/home/navs/first_page/home_page.dart';
 import 'package:mrdb/home/navs/first_page/preview_page.dart';
 import 'package:mrdb/constens/keys.dart';
-import 'package:mrdb/models/movie_model.dart';
 import 'package:mrdb/provider/client.dart';
 import 'package:provider/provider.dart';
 import 'package:shimmer/shimmer.dart';
@@ -44,33 +43,80 @@ class _FavoriteState extends State<Favorite> {
       load=false;
     });
   }
-  Future<void> removeFav({required String id, required String title }) async {
+  Future<void> removeFav({required String id, required String title}) async {
     setState(() {
       isDeleting.add(id);
     });
-    int attempt=0;
-    while(attempt<3){
-      try{
-        await FirebaseFirestore.instance.collection(AppConstants.phone).doc(clientId).collection('liked').doc(id).delete();
-          await getLiked();
+
+    int attempt = 0;
+    while (attempt < 3) {
+      try {
+        await FirebaseFirestore.instance
+            .collection(AppConstants.phone)
+            .doc(clientId)
+            .collection('liked')
+            .doc(id)
+            .delete();
+
+
+        setState(() {
+          favorites.removeWhere((e) => e['id'].toString() == id);
+          searched.removeWhere((e) => e['id'].toString() == id);
+          isDeleting.remove(id);
+        });
+
+        if (mounted) {
+          _showRemovalSnackBar(title, id);
+        }
+        return;
+      } catch (e) {
+        attempt++;
+        if (attempt < 3) {
+          await Future.delayed(Duration(seconds: 2));
+        } else {
+          if (mounted) {
+            showScaffoldMsg(context, txt: 'Failed to remove. Please try again.');
+          }
           setState(() {
             isDeleting.remove(id);
           });
-        if(mounted)showScaffoldMsg(context, txt: '"$title" removed from Favorites!');
-        return;
-      }catch(e){
-        attempt++;
-          if(attempt<3){
-            await Future.delayed(Duration(seconds: 2));
-          }else{
-            if(mounted)showScaffoldMsg(context, txt: 'try Again...');
-            setState(() {
-              isDeleting.remove(id);
-            });
-          }
+        }
       }
-
     }
+  }
+
+  void _showRemovalSnackBar(String title, String id) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: Colors.grey[900],
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.all(wt * 0.05),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(wt * 0.03),
+        ),
+        content: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green, size: wt * 0.05),
+            SizedBox(width: wt * 0.03),
+            Expanded(
+              child: Text(
+                '"$title" removed from favorites',
+                style: TextStyle(color: Colors.white),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        action: SnackBarAction(
+          label: 'UNDO',
+          textColor: Colors.amber,
+          onPressed: () async {
+
+          },
+        ),
+        duration: Duration(seconds: 3),
+      ),
+    );
   }
   @override
   void initState() {
@@ -81,216 +127,289 @@ class _FavoriteState extends State<Favorite> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        title: Text('Favorites'),
-        titleTextStyle: TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-          fontSize: wt * 0.06,
-        ),
-        centerTitle: true,
-        actions: [
-          Padding(
-            padding: EdgeInsets.only(
-              right: wt*0.05
-            ),
-            child: load?Shimmer(
-                direction: ShimmerDirection.ltr,
-                period: Duration(milliseconds: 1000),
-                gradient:LinearGradient(
-                  colors: [
-                    Colors.grey.shade800,
-                    Colors.grey.shade600,
-                    Colors.grey.shade800,
+      body: Column(
+        children: [
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: wt * 0.05, vertical: ht * 0.02),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'My Favorites',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: wt * 0.08,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    SizedBox(height: ht * 0.005),
+                    Text(
+                      'Your saved movies collection',
+                      style: TextStyle(
+                        color: Colors.grey[500],
+                        fontSize: wt * 0.035,
+                      ),
+                    ),
                   ],
-                  stops: [0.0, 0.5, 1.0],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
                 ),
-                child: CircleAvatar(
-                  radius: wt*0.06,
-                  backgroundColor: Colors.black54,
-                )
-            )
-                :CircleAvatar(
-                radius: wt*0.06,
-                backgroundColor: Colors.grey.withOpacity(0.5),
-                child: Text(favorites.length.toString(),style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: wt*0.04,
-                    color: Colors.white
-                )
-                )
-            )
-          )
-        ],
-      ),
-      body: load?
-      Shimmer(
-        direction: ShimmerDirection.ltr,
-        period: Duration(milliseconds: 1000),
-        gradient: LinearGradient(
-          colors: [
-            Colors.grey.shade800,
-            Colors.grey.shade600,
-            Colors.grey.shade800,
-          ],
-          stops: [0.0, 0.5, 1.0],
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
-        ),
-        child: Padding(
-          padding: EdgeInsets.all(wt * 0.05),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    flex: 7,
-                    child: Container(
-                      height: ht * 0.06,
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(wt * 0.04),
+                Container(
+                  width: wt * 0.15,
+                  height: wt * 0.15,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.amber[700]!, Colors.amber[900]!],
+                    ),
+                    borderRadius: BorderRadius.circular(wt * 0.04),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.amber.withOpacity(0.3),
+                        blurRadius: 15,
+                        offset: Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: load
+                        ? LoadingAnimationWidget.staggeredDotsWave(
+                      color: Colors.white,
+                      size: wt * 0.05,
+                    )
+                        : Text(
+                      favorites.length.toString(),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: wt * 0.05,
+                        color: Colors.white,
                       ),
                     ),
                   ),
-                  SizedBox(width: wt * 0.02),
-                  Expanded(
-                    flex: 3,
-                    child: Container(
-                      height: ht * 0.06,
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(wt * 0.04),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: ht * 0.03),
-              Expanded(
-                child: ListView.separated(
-                  physics: NeverScrollableScrollPhysics(),
-                  separatorBuilder: (context, index) => SizedBox(height: ht * 0.03),
-                  itemCount: 3,
-                  itemBuilder: (context, index) {
-                    return Container(
-                      width: wt * 1,
-                      height: ht * 0.2,
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(wt * 0.04),
-                      ),
-                    );
-                  },
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      )
-          :favorites.isNotEmpty?
-      Padding(
-        padding: EdgeInsets.all(wt*0.05),
-        child: Column(
-          children: [
-            Row(
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: wt * 0.05),
+            child: Row(
               children: [
                 Expanded(
                   flex: 7,
-                  child: TextFormField(
-                    textInputAction: TextInputAction.search,
-                    onChanged: (value) {
-                      setState(() {
-                        searched.clear();
-                      });
-                      for(var fav in favorites){
-                        if(fav['title'].toLowerCase().contains(value.toLowerCase().trim())){
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey[900],
+                      borderRadius: BorderRadius.circular(wt * 0.04),
+                      border: Border.all(
+                        color: Colors.grey[800]!,
+                        width: 1,
+                      ),
+                    ),
+                    child: TextFormField(
+                      enabled: favorites.isEmpty?false:true,
+                      textInputAction: TextInputAction.search,
+                      onChanged: (value) {
+                        setState(() {
+                          searched.clear();
+                        });
+                        for (var fav in favorites) {
+                          if (fav['title'].toLowerCase().contains(value.toLowerCase().trim())) {
+                            setState(() {
+                              searched.add(fav);
+                            });
+                          }
                           setState(() {
-                            searched.add(fav);
+                            if(value.isNotEmpty&&searched.isEmpty){
+                              notFound=true;
+                            }else{
+                              notFound=false;
+                            }
                           });
                         }
-                      }
-                      setState(() {
-                        if(value.isNotEmpty&&searched.isEmpty){
-                          notFound=true;
-                        }else{
-                          notFound=false;
-                        }
-                      });
-                    },
-                    textCapitalization: TextCapitalization.words,
-                    controller: favoritesSearch,
-                    cursorColor: Colors.white,
-                    cursorHeight: ht * 0.025,
-                    style: TextStyle(
-                      color: Colors.grey.shade300,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    decoration: InputDecoration(
-                      fillColor: Colors.grey.shade700,
-                      filled: true,
-                      hintText: 'search favorites...',
-                      hintStyle: TextStyle(color: Colors.grey),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(wt * 0.04),
+                        setState(() {
+                          if (value.isNotEmpty && searched.isEmpty) {
+                            notFound = true;
+                          } else {
+                            notFound = false;
+                          }
+                        });
+                      },
+                      textCapitalization: TextCapitalization.words,
+                      controller: favoritesSearch,
+                      cursorColor: Colors.amber,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w500,
                       ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(wt * 0.04),
-                        borderSide: BorderSide(
-                          color: Colors.white,
-                          width: wt * 0.006,
+                      decoration: InputDecoration(
+                        fillColor: Colors.transparent,
+                        filled: true,
+                        hintText: 'Search favorites...',
+                        hintStyle: TextStyle(color: Colors.grey[600]),
+                        prefixIcon: Icon(Icons.search, color: Colors.grey[600]),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(wt * 0.04),
+                          borderSide: BorderSide.none,
                         ),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(wt * 0.04),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(wt * 0.04),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(wt * 0.04),
+                          borderSide: BorderSide.none,
+                        ),
                       ),
                     ),
                   ),
                 ),
-                SizedBox(width: wt*0.02,),
+                SizedBox(width: wt * 0.03),
                 Expanded(
-                    flex: 3,
-                    child: Container(
-                      decoration: BoxDecoration(
-                          color: Colors.grey.withOpacity(0.1),
-                          border: Border.all(
-                              color: Colors.teal.withOpacity(0.5)
-                          ),
-                          borderRadius: BorderRadius.circular(wt*0.04)
+                  flex: 3,
+                  child: AnimatedContainer(
+                    duration: Duration(milliseconds: 200),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: isClearing
+                            ? [Colors.red[700]!, Colors.red[900]!]
+                            : [Colors.red[600]!, Colors.red[800]!],
                       ),
-                      child: TextButton(
-                          onPressed: () async {
-                            setState(() {
-                              isClearing=true;
-                            });
-                            for(var fav in favorites){
-                              await FirebaseFirestore.instance.collection(AppConstants.phone).doc(clientId).collection('liked').doc(fav['id'].toString()).delete();
-                            }
-                            await getLiked(isCleared: true);
-                            setState(() {
-                              isClearing=false;
-                            });
-                          },
-                          child: FittedBox(
-                            child: isClearing?LoadingAnimationWidget.horizontalRotatingDots(color: Colors.teal, size: wt*0.08):Text('Clear Favorites',style: TextStyle(
+                      borderRadius: BorderRadius.circular(wt * 0.04),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.red.withOpacity(0.3),
+                          blurRadius: 10,
+                          offset: Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: favorites.isEmpty
+                            ? null
+                            : () async {
+                          setState(() {
+                            isClearing = true;
+                          });
+                          for (var fav in favorites) {
+                            await FirebaseFirestore.instance
+                                .collection(AppConstants.phone)
+                                .doc(clientId)
+                                .collection('liked')
+                                .doc(fav['id'].toString())
+                                .delete();
+                          }
+                          await getLiked(isCleared: true);
+                          setState(() {
+                            isClearing = false;
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(wt * 0.04),
+                        child: SizedBox(
+                          height: ht * 0.055,
+                          child: Center(
+                            child: isClearing
+                                ? LoadingAnimationWidget.horizontalRotatingDots(
+                              color: Colors.white,
+                              size: wt * 0.08,
+                            )
+                                : Text(
+                              'Clear All',
+                              style: TextStyle(
                                 fontWeight: FontWeight.bold,
-                                color: Colors.teal,
-                                fontSize: wt*0.038
-                            ),),
-                          )
+                                color: Colors.white,
+                                fontSize: wt * 0.035,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                    )
-                )
+                    ),
+                  ),
+                ),
               ],
             ),
-            SizedBox(height: ht*0.02,),
-            Expanded(
-              child: notFound?Center(
-                child: LottieBuilder.asset('assets/lottie/no_item_found.json'),
-              ):ListView.separated(
+          ),
+          load?
+          Expanded(
+            child: Shimmer(
+              direction: ShimmerDirection.ltr,
+              period: Duration(milliseconds: 1000),
+              gradient: LinearGradient(
+                colors: [
+                  Colors.grey.shade800,
+                  Colors.grey.shade600,
+                  Colors.grey.shade800,
+                ],
+                stops: [0.0, 0.5, 1.0],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              child: Padding(
+                padding: EdgeInsets.all(wt * 0.05),
+                child: Expanded(
+                  child: ListView.separated(
+                    physics: NeverScrollableScrollPhysics(),
+                    separatorBuilder: (context, index) => SizedBox(height: ht * 0.03),
+                    itemCount: 3,
+                    itemBuilder: (context, index) {
+                      return Container(
+                        width: wt * 1,
+                        height: ht * 0.2,
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(wt * 0.04),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+          )
+              :
+          favorites.isNotEmpty?
+              notFound?
+              Expanded(
+                child: Center(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        LottieBuilder.asset(
+                          'assets/lottie/not_found.json',
+                          width: wt * 0.5,
+                          height: ht * 0.25,
+                        ),
+                        SizedBox(height: ht * 0.02),
+                        Text(
+                          'No results found',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: wt * 0.05,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: ht * 0.01),
+                        Text(
+                          'Try searching with different keywords',
+                          style: TextStyle(
+                            color: Colors.grey[500],
+                            fontSize: wt * 0.035,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+                  :
+              Expanded(
+            child: Padding(
+              padding: EdgeInsets.all(wt*0.05),
+              child: ListView.separated(
                 separatorBuilder: (context, index) => SizedBox(height: ht*0.03,),
                 physics: BouncingScrollPhysics(),
                 itemCount: searched.isNotEmpty?searched.length:favorites.length,
@@ -471,12 +590,75 @@ class _FavoriteState extends State<Favorite> {
                     ),
                   );
                 },
-              )
+              ),
             ),
-          ],
-        ),
-      )
-          :Center(child: LottieBuilder.asset('assets/lottie/not_found.json',alignment: Alignment.center,width: wt*0.8,)),
+          )
+              :
+          Container(
+            alignment: Alignment.center,
+            height: ht*0.5,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                LottieBuilder.asset(
+                  'assets/lottie/not_found.json',
+                  width: wt * 0.6,
+                  height: ht * 0.3,
+                ),
+                Text(
+                  'No favorites yet',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: wt * 0.06,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  'Start adding movies to your collection',
+                  style: TextStyle(
+                    color: Colors.grey[500],
+                    fontSize: wt * 0.04,
+                  ),
+                ),
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.amber[700]!, Colors.amber[900]!],
+                    ),
+                    borderRadius: BorderRadius.circular(wt * 0.04),
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () {
+                        setState(() {
+                          currentIndex=0;
+                        });
+                        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => MainScreen()));
+                      },
+                      borderRadius: BorderRadius.circular(wt * 0.04),
+                      child: Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: wt * 0.08,
+                          vertical: ht * 0.02,
+                        ),
+                        child: Text(
+                          'Browse Movies',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: wt * 0.045,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        ],
+      ),
     );
   }
 }
