@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:mrdb/home/bottom_nav.dart';
+import 'package:mrdb/home/navs/first_page/home_page.dart';
 import 'package:mrdb/provider/client.dart';
 import 'package:pretty_animated_text/pretty_animated_text.dart';
 import 'package:provider/provider.dart';
@@ -16,7 +17,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'main.dart';
 import 'constens/keys.dart';
-
 
 class Splash extends StatefulWidget {
   const Splash({super.key});
@@ -28,108 +28,164 @@ class Splash extends StatefulWidget {
 int pageNum = DateTime.now().second;
 
 class _SplashState extends State<Splash> {
+  bool isLoading = true;
+  bool hasError = false;
+
   Future<void> shClear() async {
     SharedPreferences preferences = await SharedPreferences.getInstance();
     preferences.clear();
   }
 
   Future<void> getDeviceDetails() async {
-    await getMovie();
-    final deviceInfo = DeviceInfoPlugin();
-    SharedPreferences preferences = await SharedPreferences.getInstance();
-    final oldSavedDev = preferences.getStringList('phone') ?? [];
-    final androidInfo = await deviceInfo.androidInfo;
-    bool isAlreadySaved =
-        oldSavedDev.isNotEmpty &&
-        oldSavedDev.length > 3 &&
-        oldSavedDev[3] == androidInfo.id;
+    // Reset states
+    if (mounted) {
+      setState(() {
+        isLoading = true;
+        hasError = false;
+      });
+    }
 
-    if (isAlreadySaved) {
+    final done = await getMovie();
+
+    if (!done) {
       if (mounted) {
-        Provider.of<ClientProvider>(
-          context,
-          listen: false,
-        ).setClientId(androidInfo.id);
+        setState(() {
+          isLoading = false;
+          hasError = true;
+        });
+        showScaffoldMsg(context, txt: 'please try again...');
       }
-      await preferences.setStringList('phone', [
-        androidInfo.brand,
-        androidInfo.model,
-        androidInfo.version.release,
-        androidInfo.id,
-      ]);
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => MainScreen()),
-        );
+      return;
+    }
+
+    try {
+      final deviceInfo = DeviceInfoPlugin();
+      SharedPreferences preferences = await SharedPreferences.getInstance();
+      final oldSavedDev = preferences.getStringList('phone') ?? [];
+      final androidInfo = await deviceInfo.androidInfo;
+
+      bool isAlreadySaved =
+          oldSavedDev.isNotEmpty &&
+              oldSavedDev.length > 3 &&
+              oldSavedDev[3] == androidInfo.id;
+
+      if (isAlreadySaved) {
+        if (mounted) {
+          Provider.of<ClientProvider>(
+            context,
+            listen: false,
+          ).setClientId(androidInfo.id);
+        }
+
+        await preferences.setStringList('phone', [
+          androidInfo.brand,
+          androidInfo.model,
+          androidInfo.version.release,
+          androidInfo.id,
+        ]);
+
+        if (mounted) {
+          setState(() {
+            isLoading = false;
+            hasError = false;
+          });
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => MainScreen()),
+          );
+        }
+      } else {
+        await FirebaseFirestore.instance
+            .collection(AppConstants.phone)
+            .doc(androidInfo.id.toString())
+            .set({
+          "brand": androidInfo.brand,
+          "model": androidInfo.model,
+          "version": androidInfo.version.release,
+          "id": androidInfo.id,
+          "createdAt": FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        await preferences.setStringList('phone', [
+          androidInfo.brand,
+          androidInfo.model,
+          androidInfo.version.release,
+          androidInfo.id,
+        ]);
+
+        if (mounted) {
+          Provider.of<ClientProvider>(
+            context,
+            listen: false,
+          ).setClientId(androidInfo.id);
+        }
+
+        if (mounted) {
+          setState(() {
+            isLoading = false;
+            hasError = false;
+          });
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => MainScreen()),
+          );
+        }
       }
-    } else {
-      FirebaseFirestore.instance
-          .collection(AppConstants.phone)
-          .doc(androidInfo.id.toString())
-          .set({
-            "brand": androidInfo.brand,
-            "model": androidInfo.model,
-            "version": androidInfo.version.release,
-            "id": androidInfo.id,
-            "createdAt": FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-      await preferences.setStringList('phone', [
-        androidInfo.brand,
-        androidInfo.model,
-        androidInfo.version.release,
-        androidInfo.id,
-      ]);
+    } catch (e) {
       if (mounted) {
-        Provider.of<ClientProvider>(
-          context,
-          listen: false,
-        ).setClientId(androidInfo.id);
-      }
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => MainScreen()),
-        );
+        setState(() {
+          isLoading = false;
+          hasError = true;
+        });
+        showScaffoldMsg(context, txt: 'Device info error: $e');
       }
     }
   }
 
-  Future<void> getMovie() async {
+  Future<bool> getMovie() async {
     Uri url = Uri.parse(
       'https://api.themoviedb.org/3/movie/popular'
-      '?api_key=${AppConstants.apiKey}'
-      '&sort_by=popularity.desc'
-      '&page=$pageNum',
+          '?api_key=${AppConstants.apiKey}'
+          '&sort_by=popularity.desc'
+          '&page=$pageNum',
     );
+
     int attempts = 0;
 
     while (attempts < 3) {
       try {
         final res = await http.get(url);
-        final data = jsonDecode(res.body);
-        setState(() {
-          all.addAll(data['results']);
-        });
 
-        return;
-      } catch (e) {
-        attempts++;
-        if (attempts < 3) {
-          await Future.delayed(Duration(seconds: 1));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+
+          if (data['results'] != null) {
+            all.addAll(data['results']);
+            return true;
+          } else {
+            attempts++;
+          }
         } else {
-          if (!mounted) return;
+          attempts++;
+        }
+      } catch (e) {
+        debugPrint('Movie fetch error (attempt ${attempts + 1}): $e');
+        attempts++;
+
+        if (attempts < 3) {
+          await Future.delayed(const Duration(seconds: 1));
         }
       }
     }
 
+    return false;
   }
 
   @override
   void initState() {
-    // shClear();
-    getDeviceDetails();
     super.initState();
+    // shClear(); // Uncomment if you need to clear preferences
+    getDeviceDetails();
   }
 
   @override
@@ -141,7 +197,9 @@ class _SplashState extends State<Splash> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              SizedBox(),
+              const SizedBox(),
+
+              // Logo Container
               Container(
                 width: wt * 0.45,
                 height: ht * 0.2,
@@ -175,10 +233,80 @@ class _SplashState extends State<Splash> {
                   ),
                 ),
               ),
-              LoadingAnimationWidget.newtonCradle(
-                color: Colors.green,
-                size: wt * 0.25,
-              ),
+
+              // Loading or Error State
+              if (hasError)
+                Padding(
+                  padding: EdgeInsets.only(bottom: ht * 0.05),
+                  child: Column(
+                    children: [
+                      Text(
+                        'Oops! Movie Load Failed.',
+                        style: TextStyle(
+                          color: Colors.orange.shade400,
+                          fontSize: wt * 0.04,
+                        ),
+                      ),
+                      SizedBox(height: ht * 0.005),
+                      Text(
+                        'Please try with VPN',
+                        style: TextStyle(
+                          color: Colors.orange.shade300,
+                          fontSize: wt * 0.035,
+                        ),
+                      ),
+                      SizedBox(height: ht * 0.02),
+                      GestureDetector(
+                        onTap: () {
+                          getDeviceDetails();
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.red.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(wt * 0.02),
+                            border: Border.all(
+                              color: Colors.red,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(
+                              vertical: ht * 0.015,
+                              horizontal: wt * 0.08,
+                            ),
+                            child: Text(
+                              'Retry',
+                              style: TextStyle(
+                                color: Colors.red,
+                                fontSize: wt * 0.045,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Padding(
+                  padding: EdgeInsets.only(bottom: ht * 0.05),
+                  child: Column(
+                    children: [
+                      LoadingAnimationWidget.newtonCradle(
+                        color: Colors.green,
+                        size: wt * 0.25,
+                      ),
+                      Text(
+                        'Loading movies...',
+                        style: TextStyle(
+                          color: Colors.green.shade300,
+                          fontSize: wt * 0.035,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ),
         ),

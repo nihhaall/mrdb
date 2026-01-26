@@ -59,17 +59,17 @@ class _HomePageState extends State<HomePage> {
       }
     });
 
-    // Uri url = Uri.parse(
-    //   'https://api.themoviedb.org/3/discover/movie'
-    //   '?api_key=${AppConstants.apiKey}'
-    //   '&with_original_language=${widget.lang}'
-    //   '&sort_by=popularity.desc'
-    //   '&page=$pageNum',
-    // );
-
     Uri url = Uri.parse(
-      'https://api.themoviedb.org/3/discover/movie?api_key=${AppConstants.apiKey}&with_original_language=ml&sort_by=popularity.desc&page=$pageNum',
+      'https://api.themoviedb.org/3/discover/movie'
+      '?api_key=${AppConstants.apiKey}'
+      '&with_original_language=${widget.lang}'
+      '&sort_by=popularity.desc'
+      '&page=$pageNum',
     );
+
+    // Uri url = Uri.parse(
+    //   'https://api.themoviedb.org/3/discover/movie?api_key=${AppConstants.apiKey}&with_original_language=ml&sort_by=popularity.desc&page=$pageNum',
+    // );
 
     int attempts = 0;
 

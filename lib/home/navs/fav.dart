@@ -349,29 +349,26 @@ class _FavoriteState extends State<Favorite> {
               ),
               child: Padding(
                 padding: EdgeInsets.all(wt * 0.05),
-                child: Expanded(
-                  child: ListView.separated(
-                    physics: NeverScrollableScrollPhysics(),
-                    separatorBuilder: (context, index) => SizedBox(height: ht * 0.03),
-                    itemCount: 3,
-                    itemBuilder: (context, index) {
-                      return Container(
-                        width: wt * 1,
-                        height: ht * 0.2,
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(wt * 0.04),
-                        ),
-                      );
-                    },
-                  ),
+                child: ListView.separated(
+                  physics: NeverScrollableScrollPhysics(),
+                  separatorBuilder: (context, index) => SizedBox(height: ht * 0.03),
+                  itemCount: 3,
+                  itemBuilder: (context, index) {
+                    return Container(
+                      width: wt * 1,
+                      height: ht * 0.2,
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(wt * 0.04),
+                      ),
+                    );
+                  },
                 ),
               ),
             ),
           )
               :
-          favorites.isNotEmpty?
-              notFound?
+          favorites.isNotEmpty? notFound?
               Expanded(
                 child: Center(
                   child: SingleChildScrollView(
@@ -407,7 +404,7 @@ class _FavoriteState extends State<Favorite> {
               )
                   :
               Expanded(
-            child: Padding(
+                child: Padding(
               padding: EdgeInsets.all(wt*0.05),
               child: ListView.separated(
                 separatorBuilder: (context, index) => SizedBox(height: ht*0.03,),
