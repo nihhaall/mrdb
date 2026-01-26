@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_rating/flutter_rating.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:lottie/lottie.dart';
@@ -23,15 +24,15 @@ import '../../../models/movie_model.dart';
 import '../../../provider/client.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
-class MoviePreview extends StatefulWidget {
+class MoviePreview extends ConsumerStatefulWidget {
   final int movieId;
   const MoviePreview({super.key, required this.movieId});
 
   @override
-  State<MoviePreview> createState() => _MoviePreviewState();
+  ConsumerState<MoviePreview> createState() => _MoviePreviewState();
 }
 
-class _MoviePreviewState extends State<MoviePreview> {
+class _MoviePreviewState extends ConsumerState<MoviePreview> {
   Random random=Random();
   bool islod = false;
   bool videoLoading = false;
@@ -44,68 +45,25 @@ class _MoviePreviewState extends State<MoviePreview> {
   List liked = [];
   List reviews = [];
 
-
-
-  Future<void> addFav({
-    required int movieId,
-    required String title,
-    required String image,
-    required String year,
-    required double rating,
-  })
-  async {
-    var deviceId = Provider.of<ClientProvider>(
-      context,
-      listen: false,
-    ).clientId!;
-    Movie movie = Movie(
-      movId: movieId,
-      title: title,
-      img: image,
-      year: year,
-      rating: rating,
-      timeStamp: DateTime.now(),
-    );
-    if (liked.contains(movieId)) {
-      showScaffoldMsg(context, txt: 'Go To Favorite Page to Remove!!');
-    }
+  Future<T?> retryOperation<T>(
+      Future<T> Function() operation, {
+        int maxAttempts = 3,
+        Duration delay = const Duration(seconds: 1),
+      }) async {
     int attempt = 0;
-    while (!liked.contains(movieId) && attempt < 3) {
-      setState(() {
-        favAdding.add(movieId);
-      });
+    while (attempt < maxAttempts) {
       try {
-        await FirebaseFirestore.instance
-            .collection(AppConstants.phone)
-            .doc(deviceId)
-            .collection('liked')
-            .doc(movie.movId.toString())
-            .set(movie.toMap());
-
-        setState(() {
-          liked.add(movieId);
-          favAdding.remove(movieId);
-        });
-
-        if (mounted)
-          showScaffoldMsg(context, txt: '"$title" added to favorites ✅');
-        return;
+        return await operation();
       } catch (e) {
         attempt++;
-        if (attempt < 3) {
-          await Future.delayed(const Duration(seconds: 1));
+        if (attempt < maxAttempts) {
+          await Future.delayed(delay);
         } else {
-          setState(() {
-            favAdding.remove(movieId);
-          });
-          if (mounted)
-            showScaffoldMsg(
-              context,
-              txt: 'Tried 3 times... please try again ❌',
-            );
+          rethrow;
         }
       }
     }
+    return null;
   }
 
   Future<void> getMovieDetails() async {
@@ -120,14 +78,13 @@ class _MoviePreviewState extends State<MoviePreview> {
       islod = true;
     });
     int attempt = 0;
-    while (attempt <= 3) {
+    while (attempt < 3) {
       try {
         http.Response res = await http.get(url);
         http.Response castRes = await http.get(castUri);
         final response = jsonDecode(res.body);
         final castResponse = jsonDecode(castRes.body);
         List allCast = castResponse['cast'];
-
         actors = allCast
             .where((element) => element['known_for_department'] == 'Acting')
             .toList();
@@ -137,13 +94,12 @@ class _MoviePreviewState extends State<MoviePreview> {
         genre = ff.map((item) => item['name'].toString()).toList();
         await getReviews();
         setState(() {
-
           islod = false;
         });
         return;
       } catch (c) {
         attempt++;
-        if (attempt <= 3) {
+        if (attempt < 3) {
           await Future.delayed(Duration(seconds: 1));
         } else {
           if (mounted) {
@@ -226,32 +182,28 @@ class _MoviePreviewState extends State<MoviePreview> {
     super.initState();
   }
 
+  String _formatDate(String? dateString) {
+    if (dateString == null) return 'Unknown date';
+    try {
+      final DateTime date = DateTime.parse(dateString);
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${months[date.month - 1]} ${date.day}, ${date.year}';
+    } catch (e) {
+      return dateString;
+    }
+  }
+  String imgUrl(dynamic path) {
+    if (path == null || path.isEmpty) {
+      return 'https://bioapdps.com.my/malayamedicalcentre/images/no-image/No-Image-Found-400x264.png';
+    }
+    if (path.startsWith('http')) return path;
+    return '${AppConstants.baseImageUrl}$path';
+  }
   @override
   Widget build(BuildContext context) {
-
-    String _formatDate(String? dateString) {
-      if (dateString == null) return 'Unknown date';
-
-      try {
-        final DateTime date = DateTime.parse(dateString);
-        final List<String> months = [
-          'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-        ];
-
-        return '${months[date.month - 1]} ${date.day}, ${date.year}';
-      } catch (e) {
-        return dateString; // Return original string if parsing fails
-      }
-    }
-    String imgUrl(dynamic path) {
-      if (path == null || path.isEmpty) {
-        return 'https://bioapdps.com.my/malayamedicalcentre/images/no-image/No-Image-Found-400x264.png';
-      }
-      if (path.startsWith('http')) return path;
-      return '${AppConstants.baseImageUrl}$path';
-    }
     final img = imgUrl(movi['backdrop_path'] ?? movi['poster_path']);
+
     return SafeArea(
       child: Scaffold(
         backgroundColor: Colors.black,
@@ -820,7 +772,7 @@ class _MoviePreviewState extends State<MoviePreview> {
                                     ),
                                   );
                                 },
-                              );
+                              ).then((_) => ytController.dispose());
                             }
                           },
                           child: videoLoading?Center(child: LoadingAnimationWidget.staggeredDotsWave(color: Colors.green, size: wt*0.1)):Container(
@@ -949,7 +901,7 @@ class _MoviePreviewState extends State<MoviePreview> {
                           ),
                         ),
                       ),
-                      if ((movi['overview'].toString()).isNotEmpty)Padding(
+                      if ((movi['overview']?.toString())?.isNotEmpty??false)Padding(
                           padding: EdgeInsets.all(wt * 0.04),
                           child: ListTile(
                             title: Padding(
@@ -1179,14 +1131,15 @@ class _MoviePreviewState extends State<MoviePreview> {
                         padding: EdgeInsets.all(wt * 0.07),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(wt * 0.05),
-                          onTap: () {
-                            currentIndex = 2;
+                          onTap: () async {
+                            ref.read(currentIndexProvider.notifier).state=2;
+                            await Future.delayed(Duration(milliseconds: 400));
                             Navigator.pushAndRemoveUntil(
                               context,
                               MaterialPageRoute(
                                 builder: (context) => MainScreen(),
                               ),
-                              (route) => false,
+                                  (route) => false,
                             );
                           },
                           child: Container(

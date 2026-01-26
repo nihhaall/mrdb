@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:http/http.dart' as http;
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:mrdb/home/bottom_nav.dart';
@@ -18,6 +19,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'main.dart';
 import 'constens/keys.dart';
 
+
 class Splash extends StatefulWidget {
   const Splash({super.key});
 
@@ -26,6 +28,8 @@ class Splash extends StatefulWidget {
 }
 
 int pageNum = DateTime.now().second;
+
+
 
 class _SplashState extends State<Splash> {
   bool isLoading = true;

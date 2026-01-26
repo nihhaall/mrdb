@@ -1,6 +1,7 @@
 import 'package:device_preview_plus/device_preview_plus.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mrdb/firebase_options.dart';
 import 'package:mrdb/provider/client.dart';
 import 'package:mrdb/splash.dart';
@@ -14,7 +15,7 @@ void main() async {
   runApp(ChangeNotifierProvider(
     create: (_) => ClientProvider(),
       child: DevicePreview(
-        builder: (context) => MRDb(),
+        builder: (context) => ProviderScope(child: MRDb()),
         enabled: false,
       )
   )
@@ -58,19 +59,21 @@ class MRDb extends StatelessWidget {
         FocusManager.instance.primaryFocus!.unfocus();
       },
 
-      child: MaterialApp(
-        theme: ThemeData(
-          bottomSheetTheme: BottomSheetThemeData(
-            backgroundColor: Colors.transparent,
+      child: SafeArea(
+        child: MaterialApp(
+          theme: ThemeData(
+            bottomSheetTheme: BottomSheetThemeData(
+              backgroundColor: Colors.transparent,
+            ),
+            appBarTheme: AppBarTheme(
+              backgroundColor: Colors.white,
+              surfaceTintColor: Colors.black,
+            ),
+            scaffoldBackgroundColor: Colors.white,
           ),
-          appBarTheme: AppBarTheme(
-            backgroundColor: Colors.white,
-            surfaceTintColor: Colors.black,
-          ),
-          scaffoldBackgroundColor: Colors.white,
+          debugShowCheckedModeBanner: false,
+          home: Splash(),
         ),
-        debugShowCheckedModeBanner: false,
-        home: Splash(),
       ),
     );
   }

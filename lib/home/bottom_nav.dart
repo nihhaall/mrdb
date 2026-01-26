@@ -1,76 +1,66 @@
-
-import 'dart:io';
-
+import 'dart:ui';
 import 'package:amicons/amicons.dart';
-import 'package:device_info_plus/device_info_plus.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:google_nav_bar/google_nav_bar.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:mrdb/home/navs/about.dart';
 import 'package:mrdb/home/navs/fav.dart';
 import 'package:mrdb/home/navs/first_page/home_page.dart';
-import 'package:provider/provider.dart';
+import 'package:mrdb/main.dart';
 
-import '../main.dart';
-import '../constens/keys.dart';
-import '../provider/client.dart';
+final currentIndexProvider = StateProvider<int>((ref) => 0);
 
-class MainScreen extends StatefulWidget {
+class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
 
   @override
-  State<MainScreen> createState() => _MainScreenState();
+  ConsumerState<MainScreen> createState() => _MainScreenState();
 }
 
-List pages=[
-  HomePage(),
-  Favorite(),
-  About()
-];
-int currentIndex=0;
+class _MainScreenState extends ConsumerState<MainScreen> {
+  final List<Widget> pages = [
+    const HomePage(),
+    const Favorite(),
+    const About(),
+  ];
 
-class _MainScreenState extends State<MainScreen> {
+  final List<BottomNavigationBarItem> navs = [
+    const BottomNavigationBarItem(
+      icon: Icon(Amicons.iconly_home),
+      label: 'Home',
+    ),
+    const BottomNavigationBarItem(
+      icon: Icon(Amicons.iconly_heart),
+      label: 'Favorites',
+    ),
+    const BottomNavigationBarItem(
+      icon: Icon(Amicons.lucide_info),
+      label: 'About',
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Scaffold(
+    final currentInd = ref.watch(currentIndexProvider);
+
+    return Scaffold(
+      body: pages[currentInd],
+      bottomNavigationBar: BottomNavigationBar(
+        items: navs,
+        currentIndex: currentInd,
         backgroundColor: Colors.black,
-        extendBody: true,
-        bottomNavigationBar: GNav(
-          backgroundColor: Colors.grey.shade900,
-          onTabChange: (value) {
-            setState(() {
-              currentIndex=value;
-            });
-          },
-            rippleColor: Colors.transparent,
-            hoverColor: Colors.transparent,
-            tabBorderRadius: wt*0.02,
-            color: Colors.grey.shade600,
-            activeColor: Colors.white,
-            iconSize: wt*0.08,
-            style: GnavStyle.oldSchool,
-            tabBackgroundColor: Colors.transparent,
-            padding: EdgeInsets.symmetric(horizontal: wt*0.09, vertical: wt*0.02),
-            tabs: [
-              GButton(
-                icon: Amicons.iconly_home,
-                text: 'Home',
-              ),
-              GButton(
-                icon: Amicons.flaticon_comment_heart_rounded,
-                text: 'Favorite',
-              ),
-              GButton(
-                icon: Amicons.lucide_badge_info,
-                text: 'Info',
-              ),
-            ]
-        ),
-        body: Padding(
-          padding: EdgeInsets.only(bottom: ht*0.06),
-        child: pages[currentIndex],
-        ),
+        selectedItemColor: Colors.white,
+        unselectedItemColor: Colors.grey,
+        elevation: 0,
+        selectedFontSize: wt*0.035,
+        unselectedFontSize: wt*0.025,
+        type: BottomNavigationBarType.fixed,
+
+        selectedIconTheme: IconThemeData(size: wt*0.07),
+        unselectedIconTheme: IconThemeData(size: wt*0.04),
+        onTap: (index) {
+          ref.read(currentIndexProvider.notifier).state = index;
+        },
       ),
     );
   }

@@ -7,6 +7,7 @@ class Movie {
   final String year;
   final double rating;
   final DateTime timeStamp;
+  final bool delete;
 
   Movie({
     required this.movId,
@@ -14,7 +15,8 @@ class Movie {
     required this.img,
     required this.year,
     required this.rating,
-    required this.timeStamp,
+    required this.timeStamp, required this.delete,
+
   });
 
   // copyWith
@@ -25,6 +27,7 @@ class Movie {
     String? year,
     double? rating,
     DateTime? timeStamp,
+    bool? delete
   }) {
     return Movie(
       movId: id ?? movId,
@@ -32,7 +35,8 @@ class Movie {
       img: img ?? this.img,
       year: year ?? this.year,
       rating: rating ?? this.rating,
-      timeStamp: timeStamp??this.timeStamp
+      timeStamp: timeStamp??this.timeStamp,
+      delete: delete??this.delete
     );
   }
 
@@ -44,7 +48,8 @@ class Movie {
       img: map['img'] ?? '',
       year: map['year'] ?? '',
       rating: (map['rating'] ?? 0).toDouble(),
-      timeStamp: map['timeStamp'] ?? DateTime.now()
+      timeStamp: map['timeStamp'] ?? DateTime.now(),
+      delete: map['delete']??false
     );
   }
 
@@ -57,6 +62,7 @@ class Movie {
       'year': year,
       'rating': rating,
       'timeStamp': timeStamp,
+      'delete': delete
     };
   }
 }
