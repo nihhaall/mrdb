@@ -25,7 +25,7 @@ import '../../../provider/client.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
 class MoviePreview extends ConsumerStatefulWidget {
-  final int movieId;
+  final String movieId;
   const MoviePreview({super.key, required this.movieId});
 
   @override

@@ -6,6 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_rating/flutter_rating.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 import 'package:http/http.dart' as http;
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:mrdb/home/navs/first_page/preview_page.dart';
@@ -353,181 +354,203 @@ class _HomePageState extends State<HomePage> {
     _scrollToTop(animate: false);
   }
 
+  bool tap=false;
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      floatingActionButton: _showFAB
-          ? Padding(
-        padding: EdgeInsets.symmetric(vertical: wt * 0.03, horizontal: wt * 0.01),
-        child: FloatingActionButton(
-          onPressed: _scrollToTop,
-          backgroundColor: Colors.white70,
-          child: const Icon(Icons.arrow_upward, color: Colors.black),
-        ),
-      )
-          : null,
-      appBar: AppBar(
-        title: const Text('MRDb'),
-        titleTextStyle: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: wt * 0.06),
+    return PopScope(
+      canPop: tap,
+      onPopInvokedWithResult: (didPop, result) async {
+        if(!tap){
+
+          Fluttertoast.showToast(
+              msg: 'Press back again to exit',
+            toastLength: Toast.LENGTH_SHORT,
+            gravity: ToastGravity.BOTTOM,
+          );
+
+        }
+        setState(() {
+           tap=true;
+        });
+        await Future.delayed(Duration(seconds: 2));
+        setState(() {
+          tap=false;
+        });
+      },
+      child: Scaffold(
         backgroundColor: Colors.black,
-        leading: Icon(Icons.menu, color: Colors.white, size: wt * 0.08),
-        actions: [
-          Icon(Icons.movie_creation_outlined, color: Colors.white, size: wt * 0.08),
-          SizedBox(width: wt * 0.03),
-        ],
-      ),
-      body: _hasError
-          ? Center(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(wt * 0.1),
-          onTap: () {
-            _initializeData();
-          },
-          child: Container(
-            padding: EdgeInsets.symmetric(horizontal: wt * 0.05, vertical: wt * 0.025),
-            decoration: BoxDecoration(color: Colors.grey.shade700, borderRadius: BorderRadius.circular(wt * 0.1)),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Amicons.vuesax_refresh_circle_fill, size: wt * 0.07, color: Colors.white54),
-                SizedBox(width: wt * 0.02),
-                const Text('Retry', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
-              ],
+        floatingActionButton: _showFAB
+            ? Padding(
+          padding: EdgeInsets.symmetric(vertical: wt * 0.03, horizontal: wt * 0.01),
+          child: FloatingActionButton(
+            onPressed: _scrollToTop,
+            backgroundColor: Colors.white70,
+            child: const Icon(Icons.arrow_upward, color: Colors.black),
+          ),
+        )
+            : null,
+        appBar: AppBar(
+          title: const Text('MRDb'),
+          titleTextStyle: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: wt * 0.06),
+          backgroundColor: Colors.black,
+          leading: Icon(Icons.menu, color: Colors.white, size: wt * 0.08),
+          actions: [
+            Icon(Icons.movie_creation_outlined, color: Colors.white, size: wt * 0.08),
+            SizedBox(width: wt * 0.03),
+          ],
+        ),
+        body: _hasError
+            ? Center(
+          child: InkWell(
+            borderRadius: BorderRadius.circular(wt * 0.1),
+            onTap: () {
+              _initializeData();
+            },
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: wt * 0.05, vertical: wt * 0.025),
+              decoration: BoxDecoration(color: Colors.grey.shade700, borderRadius: BorderRadius.circular(wt * 0.1)),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Amicons.vuesax_refresh_circle_fill, size: wt * 0.07, color: Colors.white54),
+                  SizedBox(width: wt * 0.02),
+                  const Text('Retry', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
+                ],
+              ),
             ),
           ),
-        ),
-      )
-          : NotificationListener<ScrollNotification>(
-        onNotification: _handleScrollNotification,
-        child: RefreshIndicator(
-          onRefresh: _onRefresh,
-          color: Colors.green,
-          backgroundColor: Colors.grey.shade900,
-          child: CustomScrollView(
-            controller: _scrollController,
-            slivers: [
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(wt * 0.04, wt * 0.02, wt * 0.04, wt * 0.02),
-                  child: TextFormField(
-                    controller: _searchController,
-                    textInputAction: TextInputAction.search,
-                    onFieldSubmitted: _searchMovies,
-                    cursorColor: Colors.white,
-                    cursorHeight: ht * 0.025,
-                    style: TextStyle(color: Colors.grey.shade300, fontWeight: FontWeight.w600),
-                    decoration: InputDecoration(
-                      fillColor: Colors.grey.shade700,
-                      filled: true,
-                      hintText: 'Search movies...',
-                      hintStyle: const TextStyle(color: Colors.grey),
-                      prefixIcon: const Icon(Icons.search, color: Colors.grey),
-                      suffixIcon: _searchController.text.isNotEmpty
-                          ? IconButton(
-                        icon: const Icon(Icons.clear, color: Colors.grey),
-                        onPressed: () {
-                          _searchController.clear();
-                          _onRefresh(); // Reset to discover
-                        },
-                      )
-                          : null,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(wt * 0.04)),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(wt * 0.04),
-                        borderSide: BorderSide(color: Colors.white, width: wt * 0.006),
+        )
+            : NotificationListener<ScrollNotification>(
+          onNotification: _handleScrollNotification,
+          child: RefreshIndicator(
+            onRefresh: _onRefresh,
+            color: Colors.green,
+            backgroundColor: Colors.grey.shade900,
+            child: CustomScrollView(
+              controller: _scrollController,
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(wt * 0.04, wt * 0.02, wt * 0.04, wt * 0.02),
+                    child: TextFormField(
+                      controller: _searchController,
+                      textInputAction: TextInputAction.search,
+                      onFieldSubmitted: _searchMovies,
+                      cursorColor: Colors.white,
+                      cursorHeight: ht * 0.025,
+                      style: TextStyle(color: Colors.grey.shade300, fontWeight: FontWeight.w600),
+                      decoration: InputDecoration(
+                        fillColor: Colors.grey.shade700,
+                        filled: true,
+                        hintText: 'Search movies...',
+                        hintStyle: const TextStyle(color: Colors.grey),
+                        prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                        suffixIcon: _searchController.text.isNotEmpty
+                            ? IconButton(
+                          icon: const Icon(Icons.clear, color: Colors.grey),
+                          onPressed: () {
+                            _searchController.clear();
+                            _onRefresh(); // Reset to discover
+                          },
+                        )
+                            : null,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(wt * 0.04)),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(wt * 0.04),
+                          borderSide: BorderSide(color: Colors.white, width: wt * 0.006),
+                        ),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(wt * 0.04)),
                       ),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(wt * 0.04)),
                     ),
                   ),
                 ),
-              ),
 
-              // 2. Language Tabs (Hidden during search)
-              if (!_isSearching)
-                SliverToBoxAdapter(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    padding: EdgeInsets.symmetric(horizontal: wt * 0.04),
-                    child: Row(
-                      children: _languages.map((lang) {
-                        final isSelected = _selectedLangCode == lang['code'];
-                        return Padding(
-                          padding: EdgeInsets.only(right: wt * 0.02),
-                          child: ChoiceChip(
-                            label: Text(lang['name']!),
-                            selected: isSelected,
-                            onSelected: (_) => _onLanguageChange(lang['code']!),
-                            selectedColor: Colors.green,
-                            backgroundColor: Colors.grey.shade800,
-                            labelStyle: TextStyle(
-                              color: isSelected ? Colors.white : Colors.grey.shade400,
-                              fontWeight: FontWeight.bold,
+                // 2. Language Tabs (Hidden during search)
+                if (!_isSearching)
+                  SliverToBoxAdapter(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      padding: EdgeInsets.symmetric(horizontal: wt * 0.04),
+                      child: Row(
+                        children: _languages.map((lang) {
+                          final isSelected = _selectedLangCode == lang['code'];
+                          return Padding(
+                            padding: EdgeInsets.only(right: wt * 0.02),
+                            child: ChoiceChip(
+                              label: Text(lang['name']!),
+                              selected: isSelected,
+                              onSelected: (_) => _onLanguageChange(lang['code']!),
+                              selectedColor: Colors.green,
+                              backgroundColor: Colors.grey.shade800,
+                              labelStyle: TextStyle(
+                                color: isSelected ? Colors.white : Colors.grey.shade400,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              side: BorderSide.none,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                             ),
-                            side: BorderSide.none,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(wt * 0.04, wt * 0.04, wt * 0.04, wt * 0.02),
+                    child: Text(
+                      _isSearching ? "Search Results" : "Discover Movies",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: wt * 0.05,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+
+                _isLoading
+                    ? SliverToBoxAdapter(child: _buildShimmerLoading())
+                    : (_movies.isEmpty
+                    ? SliverToBoxAdapter(child: _buildEmptyState())
+                    : SliverPadding(
+                  padding: EdgeInsets.symmetric(horizontal: wt * 0.04),
+                  sliver: SliverGrid(
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      mainAxisSpacing: ht * 0.02,
+                      crossAxisSpacing: wt * 0.04,
+                      mainAxisExtent: wt * 0.9,
+                    ),
+                    delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                        return _MovieCard(
+                          movie: _movies[index],
+                          isLiked: _likedMovieIds.contains(_movies[index]['id']),
+                          isLiking: _likingInProgress.contains(_movies[index]['id']),
+                          onTap: () => _navigateToPreview(_movies[index]['id']),
+                          onFavorite: () => _addToFavorites(
+                            movieId: _movies[index]['id'],
+                            title: _movies[index]['title'] ?? '',
+                            posterPath: _movies[index]['poster_path'],
+                            releaseDate: _movies[index]['release_date'],
+                            rating: (_movies[index]['vote_average'] ?? 0).toDouble(),
                           ),
                         );
-                      }).toList(),
+                      },
+                      childCount: _movies.length,
                     ),
                   ),
-                ),
+                )),
 
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(wt * 0.04, wt * 0.04, wt * 0.04, wt * 0.02),
-                  child: Text(
-                    _isSearching ? "Search Results" : "Discover Movies",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: wt * 0.05,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
+                // 6. Pagination Loader
+                if (_isLoadingMore)
+                  SliverToBoxAdapter(child: _buildLoadingMoreIndicator()),
 
-              _isLoading
-                  ? SliverToBoxAdapter(child: _buildShimmerLoading())
-                  : (_movies.isEmpty
-                  ? SliverToBoxAdapter(child: _buildEmptyState())
-                  : SliverPadding(
-                padding: EdgeInsets.symmetric(horizontal: wt * 0.04),
-                sliver: SliverGrid(
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    mainAxisSpacing: ht * 0.02,
-                    crossAxisSpacing: wt * 0.04,
-                    mainAxisExtent: wt * 0.9,
-                  ),
-                  delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                      return _MovieCard(
-                        movie: _movies[index],
-                        isLiked: _likedMovieIds.contains(_movies[index]['id']),
-                        isLiking: _likingInProgress.contains(_movies[index]['id']),
-                        onTap: () => _navigateToPreview(_movies[index]['id']),
-                        onFavorite: () => _addToFavorites(
-                          movieId: _movies[index]['id'],
-                          title: _movies[index]['title'] ?? '',
-                          posterPath: _movies[index]['poster_path'],
-                          releaseDate: _movies[index]['release_date'],
-                          rating: (_movies[index]['vote_average'] ?? 0).toDouble(),
-                        ),
-                      );
-                    },
-                    childCount: _movies.length,
-                  ),
-                ),
-              )),
-
-              // 6. Pagination Loader
-              if (_isLoadingMore)
-                SliverToBoxAdapter(child: _buildLoadingMoreIndicator()),
-
-              // Bottom padding
-              SliverToBoxAdapter(child: SizedBox(height: ht * 0.05)),
-            ],
+                // Bottom padding
+                SliverToBoxAdapter(child: SizedBox(height: ht * 0.05)),
+              ],
+            ),
           ),
         ),
       ),
@@ -593,12 +616,10 @@ class _HomePageState extends State<HomePage> {
   void _navigateToPreview(int movieId) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => MoviePreview(movieId: movieId)),
+      MaterialPageRoute(builder: (context) => MoviePreview(movieId: movieId.toString())),
     );
   }
 }
-
-// ==================== SUB WIDGETS ====================
 
 class _MovieCard extends StatelessWidget {
   final Map<String, dynamic> movie;

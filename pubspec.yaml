@@ -55,6 +55,7 @@ dependencies:
   http: ^1.5.0
   marquee: ^2.2.3
   shared_preferences:
+  fluttertoast: ^9.0.0
 flutter_icons:
   android: true
   ios: true

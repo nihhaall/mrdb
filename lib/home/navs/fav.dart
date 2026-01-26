@@ -336,15 +336,21 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(),
-            _buildSearchBar(),
-            _buildContent(ref),
-          ],
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        ref.read(currentIndexProvider.notifier).state=0;
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0A0A0A),
+        body: SafeArea(
+          child: Column(
+            children: [
+              _buildHeader(),
+              _buildSearchBar(),
+              _buildContent(ref),
+            ],
+          ),
         ),
       ),
     );
@@ -366,7 +372,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
                     children: [
                       Icon(
                         Amicons.iconly_heart,
-                        color: Colors.amber,
+                        color: Colors.green,
                         size: wt * 0.07,
                       ),
                       SizedBox(width: wt * 0.02),
@@ -410,16 +416,12 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Colors.amber[600]!, Colors.amber[800]!],
+            colors: [
+              Colors.green,
+              Colors.green.withValues(alpha: 0.2)
+            ],
           ),
           borderRadius: BorderRadius.circular(wt * 0.045),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.amber.withOpacity(0.4),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
         ),
         child: Center(
           child: load
@@ -477,7 +479,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
                 onChanged: _handleSearch,
                 textCapitalization: TextCapitalization.words,
                 controller: favoritesSearch,
-                cursorColor: Colors.amber,
+                cursorColor: Colors.grey,
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w500,
@@ -493,7 +495,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
                   ),
                   prefixIcon: Icon(
                     Icons.search_rounded,
-                    color: favoritesSearch.text.isNotEmpty ? Colors.amber : Colors.grey[600],
+                    color: favoritesSearch.text.isNotEmpty ? Colors.green : Colors.grey[600],
                   ),
                   suffixIcon: favoritesSearch.text.isNotEmpty
                       ? IconButton(
@@ -546,7 +548,6 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
 
   Widget _buildClearButton() {
     final bool isEnabled = favorites.isNotEmpty && !isClearing;
-
     return Expanded(
       flex: 3,
       child: AnimatedContainer(
@@ -659,17 +660,8 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
                   SizedBox(height: ht * 0.04),
                   Container(
                     decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Colors.amber[600]!, Colors.amber[800]!],
-                      ),
                       borderRadius: BorderRadius.circular(wt * 0.04),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.amber.withOpacity(0.4),
-                          blurRadius: 20,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
+                      color: Colors.blueGrey
                     ),
                     child: Material(
                       color: Colors.transparent,
@@ -801,7 +793,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
                 child: Text(
                   'Clear search',
                   style: TextStyle(
-                    color: Colors.amber,
+                    color: Colors.green,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -821,7 +813,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
         opacity: _fadeAnimation,
         child: RefreshIndicator(
           onRefresh: getLiked,
-          color: Colors.amber,
+          color: Colors.green,
           backgroundColor: const Color(0xFF1A1A1A),
           child: ListView.builder(
             padding: EdgeInsets.all(wt * 0.05),
@@ -991,7 +983,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
                   color: Colors.grey[900],
                   child: Center(
                     child: LoadingAnimationWidget.fourRotatingDots(
-                      color: Colors.amber,
+                      color: Colors.green,
                       size: wt * 0.06,
                     ),
                   ),
@@ -1175,9 +1167,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
       width: double.infinity,
       child: Container(
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Colors.amber[600]!, Colors.amber[800]!],
-          ),
+          color: Colors.green.shade900,
           borderRadius: BorderRadius.circular(wt * 0.025),
         ),
         child: Material(
