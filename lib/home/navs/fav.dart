@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:lottie/lottie.dart';
 import 'package:mrdb/home/bottom_nav.dart';
-import 'package:mrdb/home/navs/first_page/home_page.dart';
 import 'package:mrdb/home/navs/first_page/preview_page.dart';
 import 'package:mrdb/constens/keys.dart';
 import 'package:mrdb/provider/client.dart';
@@ -23,7 +22,8 @@ class Favorite extends ConsumerStatefulWidget {
   ConsumerState<Favorite> createState() => _FavoriteState();
 }
 
-class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMixin {
+class _FavoriteState extends ConsumerState<Favorite>
+    with TickerProviderStateMixin {
   List favorites = [];
   String clientId = '';
   List isDeleting = [];
@@ -56,13 +56,14 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
       vsync: this,
     );
 
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _fadeController, curve: Curves.easeOut),
-    );
-    _headerSlideAnimation = Tween<Offset>(
-      begin: const Offset(0, -0.5),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _headerController, curve: Curves.easeOutBack));
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _fadeController, curve: Curves.easeOut));
+    _headerSlideAnimation =
+        Tween<Offset>(begin: const Offset(0, -0.5), end: Offset.zero).animate(
+          CurvedAnimation(parent: _headerController, curve: Curves.easeOutBack),
+        );
 
     _headerController.forward();
   }
@@ -78,20 +79,25 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
   Future<void> getLiked({bool isCleared = false}) async {
     if (!isCleared) setState(() => load = true);
     clientId = Provider.of<ClientProvider>(context, listen: false).clientId!;
-    var client = FirebaseFirestore.instance.collection(AppConstants.phone).doc(clientId);
-    var liks = await client.collection('liked').where('delete',isEqualTo: false).orderBy('timeStamp', descending: true).get();
-    if(mounted) {
+    var client = FirebaseFirestore.instance
+        .collection(AppConstants.phone)
+        .doc(clientId);
+    var liks = await client
+        .collection('liked')
+        .where('delete', isEqualTo: false)
+        .orderBy('timeStamp', descending: true)
+        .get();
+    if (mounted) {
       setState(() {
-      favorites = liks.docs.map((doc) {
-        final data = doc.data();
-        data['id'] = doc.id; // ✅ ensure id exists
-        return data;
-      }).toList();
-      load = false;
-    });
+        favorites = liks.docs.map((doc) {
+          final data = doc.data();
+          data['id'] = doc.id; // ✅ ensure id exists
+          return data;
+        }).toList();
+        load = false;
+      });
       _fadeController.forward();
     }
-
   }
 
   Future<void> removeFav({
@@ -117,11 +123,10 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
             .doc(id)
             .update({'delete': true});
 
-        setState(() {
-          isDeleting.remove(id);
-        });
-
         if (mounted) {
+          setState(() {
+            isDeleting.remove(id);
+          });
           await _showRemovalSnackBar(title, id, item, index);
         }
         return;
@@ -132,24 +137,35 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
           await Future.delayed(const Duration(seconds: 2));
         } else {
           if (mounted) {
-            showScaffoldMsg(context, txt: 'Failed to remove. Please try again.');
+            showScaffoldMsg(
+              context,
+              txt: 'Failed to remove. Please try again.',
+            );
+            setState(() {
+              isDeleting.remove(id);
+            });
           }
-          setState(() {
-            isDeleting.remove(id);
-          });
         }
       }
     }
   }
 
-  Future<void> _showRemovalSnackBar(String title, String id, dynamic removedItem, int removedIndex) async {
+  Future<void> _showRemovalSnackBar(
+    String title,
+    String id,
+    dynamic removedItem,
+    int removedIndex,
+  ) async {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         backgroundColor: const Color(0xFF1E1E1E),
         behavior: SnackBarBehavior.floating,
         margin: EdgeInsets.all(wt * 0.04),
-        padding: EdgeInsets.symmetric(horizontal: wt * 0.04, vertical: ht * 0.015),
+        padding: EdgeInsets.symmetric(
+          horizontal: wt * 0.04,
+          vertical: ht * 0.015,
+        ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(wt * 0.04),
         ),
@@ -206,9 +222,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
 
   Future<void> _undoRemoval(dynamic item, int index) async {
     try {
-
-      final Map<String, dynamic> data =
-      item is QueryDocumentSnapshot
+      final Map<String, dynamic> data = item is QueryDocumentSnapshot
           ? Map<String, dynamic>.from(item.data() as Map<String, dynamic>)
           : Map<String, dynamic>.from(item);
 
@@ -224,13 +238,12 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
 
         // 🔥 FIX: restore into searched list if search active
         if (favoritesSearch.text.isNotEmpty &&
-            item['title']
-                .toLowerCase()
-                .contains(favoritesSearch.text.toLowerCase())) {
+            item['title'].toLowerCase().contains(
+              favoritesSearch.text.toLowerCase(),
+            )) {
           searched.insert(0, item);
         }
       });
-
 
       HapticFeedback.lightImpact();
     } catch (e) {
@@ -254,7 +267,11 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
                 color: Colors.red.withOpacity(0.2),
                 shape: BoxShape.circle,
               ),
-              child: Icon(Amicons.iconly_delete, color: Colors.red, size: wt * 0.06),
+              child: Icon(
+                Amicons.iconly_delete,
+                color: Colors.red,
+                size: wt * 0.06,
+              ),
             ),
             SizedBox(width: wt * 0.03),
             Text(
@@ -269,10 +286,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
         ),
         content: Text(
           'This will remove all ${favorites.length} movies from your favorites. This action cannot be undone.',
-          style: TextStyle(
-            color: Colors.grey[400],
-            fontSize: wt * 0.038,
-          ),
+          style: TextStyle(color: Colors.grey[400], fontSize: wt * 0.038),
         ),
         actions: [
           TextButton(
@@ -323,7 +337,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
           .doc(clientId)
           .collection('liked')
           .doc(fav['id'].toString())
-          .update({'delete':true});
+          .update({'delete': true});
     }
 
     await getLiked(isCleared: true);
@@ -339,17 +353,13 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        ref.read(currentIndexProvider.notifier).state=0;
+        ref.read(currentIndexProvider.notifier).state = 0;
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF0A0A0A),
         body: SafeArea(
           child: Column(
-            children: [
-              _buildHeader(),
-              _buildSearchBar(),
-              _buildContent(ref),
-            ],
+            children: [_buildHeader(), _buildSearchBar(), _buildContent(ref)],
           ),
         ),
       ),
@@ -360,7 +370,12 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
     return SlideTransition(
       position: _headerSlideAnimation,
       child: Container(
-        padding: EdgeInsets.fromLTRB(wt * 0.05, ht * 0.02, wt * 0.05, ht * 0.015),
+        padding: EdgeInsets.fromLTRB(
+          wt * 0.05,
+          ht * 0.02,
+          wt * 0.05,
+          ht * 0.015,
+        ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -416,40 +431,37 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              Colors.green,
-              Colors.green.withValues(alpha: 0.2)
-            ],
+            colors: [Colors.green, Colors.green.withValues(alpha: 0.2)],
           ),
           borderRadius: BorderRadius.circular(wt * 0.045),
         ),
         child: Center(
           child: load
               ? LoadingAnimationWidget.staggeredDotsWave(
-            color: Colors.white,
-            size: wt * 0.05,
-          )
-              : Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                favorites.length.toString(),
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: wt * 0.055,
                   color: Colors.white,
+                  size: wt * 0.05,
+                )
+              : Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      favorites.length.toString(),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: wt * 0.055,
+                        color: Colors.white,
+                      ),
+                    ),
+                    Text(
+                      'movies',
+                      style: TextStyle(
+                        fontSize: wt * 0.025,
+                        color: Colors.white70,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              Text(
-                'movies',
-                style: TextStyle(
-                  fontSize: wt * 0.025,
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );
@@ -495,19 +507,25 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
                   ),
                   prefixIcon: Icon(
                     Icons.search_rounded,
-                    color: favoritesSearch.text.isNotEmpty ? Colors.green : Colors.grey[600],
+                    color: favoritesSearch.text.isNotEmpty
+                        ? Colors.green
+                        : Colors.grey[600],
                   ),
                   suffixIcon: favoritesSearch.text.isNotEmpty
                       ? IconButton(
-                    icon: Icon(Icons.clear, color: Colors.grey[500], size: wt * 0.05),
-                    onPressed: () {
-                      favoritesSearch.clear();
-                      setState(() {
-                        searched.clear();
-                        notFound = false;
-                      });
-                    },
-                  )
+                          icon: Icon(
+                            Icons.clear,
+                            color: Colors.grey[500],
+                            size: wt * 0.05,
+                          ),
+                          onPressed: () {
+                            favoritesSearch.clear();
+                            setState(() {
+                              searched.clear();
+                              notFound = false;
+                            });
+                          },
+                        )
                       : null,
                   border: InputBorder.none,
                   contentPadding: EdgeInsets.symmetric(
@@ -554,21 +572,17 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
         duration: const Duration(milliseconds: 200),
         decoration: BoxDecoration(
           gradient: isEnabled
-              ? LinearGradient(
-            colors: [Colors.red[600]!, Colors.red[800]!],
-          )
-              : LinearGradient(
-            colors: [Colors.grey[700]!, Colors.grey[800]!],
-          ),
+              ? LinearGradient(colors: [Colors.red[600]!, Colors.red[800]!])
+              : LinearGradient(colors: [Colors.grey[700]!, Colors.grey[800]!]),
           borderRadius: BorderRadius.circular(wt * 0.04),
           boxShadow: isEnabled
               ? [
-            BoxShadow(
-              color: Colors.red.withOpacity(0.3),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ]
+                  BoxShadow(
+                    color: Colors.red.withOpacity(0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
               : null,
         ),
         child: Material(
@@ -581,28 +595,30 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
               child: Center(
                 child: isClearing
                     ? LoadingAnimationWidget.horizontalRotatingDots(
-                  color: Colors.white,
-                  size: wt * 0.07,
-                )
+                        color: Colors.white,
+                        size: wt * 0.07,
+                      )
                     : Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Amicons.iconly_delete,
-                      color: isEnabled ? Colors.white : Colors.grey[500],
-                      size: wt * 0.045,
-                    ),
-                    SizedBox(width: wt * 0.015),
-                    Text(
-                      'Clear',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: isEnabled ? Colors.white : Colors.grey[500],
-                        fontSize: wt * 0.033,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Amicons.iconly_delete,
+                            color: isEnabled ? Colors.white : Colors.grey[500],
+                            size: wt * 0.045,
+                          ),
+                          SizedBox(width: wt * 0.015),
+                          Text(
+                            'Clear',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: isEnabled
+                                  ? Colors.white
+                                  : Colors.grey[500],
+                              fontSize: wt * 0.033,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
-                ),
               ),
             ),
           ),
@@ -661,18 +677,20 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
                   Container(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(wt * 0.04),
-                      color: Colors.blueGrey
+                      color: Colors.blueGrey,
                     ),
                     child: Material(
                       color: Colors.transparent,
                       child: InkWell(
                         onTap: () {
                           HapticFeedback.lightImpact();
-                          ref.read(currentIndexProvider.notifier).state=0;
+                          ref.read(currentIndexProvider.notifier).state = 0;
 
                           Navigator.pushReplacement(
                             context,
-                            MaterialPageRoute(builder: (context) => MainScreen()),
+                            MaterialPageRoute(
+                              builder: (context) => MainScreen(),
+                            ),
                           );
                         },
                         borderRadius: BorderRadius.circular(wt * 0.04),
@@ -684,7 +702,11 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.movie_outlined, color: Colors.white, size: wt * 0.05),
+                              Icon(
+                                Icons.movie_outlined,
+                                color: Colors.white,
+                                size: wt * 0.05,
+                              ),
                               SizedBox(width: wt * 0.02),
                               Text(
                                 'Browse Movies',
@@ -750,7 +772,6 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
     );
   }
 
-
   Widget _buildNotFoundState() {
     return Expanded(
       child: Center(
@@ -776,10 +797,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
               SizedBox(height: ht * 0.01),
               Text(
                 'Try searching with different keywords',
-                style: TextStyle(
-                  color: Colors.grey[500],
-                  fontSize: wt * 0.035,
-                ),
+                style: TextStyle(color: Colors.grey[500], fontSize: wt * 0.035),
               ),
               SizedBox(height: ht * 0.02),
               TextButton(
@@ -828,10 +846,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
                 builder: (context, value, child) {
                   return Transform.translate(
                     offset: Offset(0, 30 * (1 - value)),
-                    child: Opacity(
-                      opacity: value,
-                      child: child,
-                    ),
+                    child: Opacity(opacity: value, child: child),
                   );
                 },
                 child: Padding(
@@ -852,26 +867,32 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
     return Dismissible(
       key: Key(item['id'].toString()),
       direction: DismissDirection.endToStart,
-        confirmDismiss: (_) async {
-          HapticFeedback.mediumImpact();
-          return await showDialog(
-            context: context,
-            builder: (_) => AlertDialog(
-              backgroundColor: const Color(0xFF1E1E1E),
-              title: const Text('Remove favorite?', style: TextStyle(color: Colors.white)),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Cancel'),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text('Remove', style: TextStyle(color: Colors.red)),
-                ),
-              ],
+      confirmDismiss: (_) async {
+        HapticFeedback.mediumImpact();
+        return await showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            backgroundColor: const Color(0xFF1E1E1E),
+            title: const Text(
+              'Remove favorite?',
+              style: TextStyle(color: Colors.white),
             ),
-          );
-        },
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text(
+                  'Remove',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
       onDismissed: (direction) {
         final removedItem = Map<String, dynamic>.from(item);
 
@@ -880,12 +901,8 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
           searched.removeWhere((e) => e['id'] == removedItem['id']);
         });
 
-        removeFav(
-          item: removedItem,
-          index: index,
-        );
+        removeFav(item: removedItem, index: index);
       },
-
 
       background: Container(
         alignment: Alignment.centerRight,
@@ -927,10 +944,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
           decoration: BoxDecoration(
             color: const Color(0xFF1A1A1A),
             borderRadius: BorderRadius.circular(wt * 0.05),
-            border: Border.all(
-              color: Colors.grey[850]!,
-              width: 1,
-            ),
+            border: Border.all(color: Colors.grey[850]!, width: 1),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.3),
@@ -944,9 +958,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
             child: Row(
               children: [
                 _buildMoviePoster(item, isItemDeleting),
-                Expanded(
-                  child: _buildMovieInfo(item, isItemDeleting),
-                ),
+                Expanded(child: _buildMovieInfo(item, isItemDeleting)),
               ],
             ),
           ),
@@ -1002,12 +1014,9 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
               onTap: isItemDeleting
                   ? null
                   : () {
-                HapticFeedback.mediumImpact();
-                removeFav(
-                  item: item,
-                  index: favorites.indexOf(item),
-                );
-              },
+                      HapticFeedback.mediumImpact();
+                      removeFav(item: item, index: favorites.indexOf(item));
+                    },
               borderRadius: BorderRadius.only(
                 topLeft: Radius.circular(wt * 0.05),
                 bottomRight: Radius.circular(wt * 0.04),
@@ -1026,14 +1035,14 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
                 ),
                 child: isItemDeleting
                     ? LoadingAnimationWidget.threeArchedCircle(
-                  color: Colors.white,
-                  size: wt * 0.05,
-                )
+                        color: Colors.white,
+                        size: wt * 0.05,
+                      )
                     : Icon(
-                  Amicons.iconly_delete,
-                  color: Colors.white,
-                  size: wt * 0.05,
-                ),
+                        Amicons.iconly_delete,
+                        color: Colors.white,
+                        size: wt * 0.05,
+                      ),
               ),
             ),
           ),
@@ -1110,19 +1119,12 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
       decoration: BoxDecoration(
         color: ratingColor.withOpacity(0.15),
         borderRadius: BorderRadius.circular(wt * 0.02),
-        border: Border.all(
-          color: ratingColor.withOpacity(0.4),
-          width: 1,
-        ),
+        border: Border.all(color: ratingColor.withOpacity(0.4), width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            Icons.star_rounded,
-            color: ratingColor,
-            size: wt * 0.04,
-          ),
+          Icon(Icons.star_rounded, color: ratingColor, size: wt * 0.04),
           SizedBox(width: wt * 0.01),
           Text(
             ratingValue.toStringAsFixed(1),
@@ -1146,10 +1148,7 @@ class _FavoriteState extends ConsumerState<Favorite> with TickerProviderStateMix
       decoration: BoxDecoration(
         color: Colors.grey.withOpacity(0.2),
         borderRadius: BorderRadius.circular(wt * 0.02),
-        border: Border.all(
-          color: Colors.grey.withOpacity(0.3),
-          width: 1,
-        ),
+        border: Border.all(color: Colors.grey.withOpacity(0.3), width: 1),
       ),
       child: Text(
         year,

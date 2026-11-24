@@ -1,24 +1,18 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:amicons/amicons.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/legacy.dart';
 import 'package:http/http.dart' as http;
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:mrdb/home/bottom_nav.dart';
-import 'package:mrdb/home/navs/first_page/home_page.dart';
 import 'package:mrdb/provider/client.dart';
-import 'package:pretty_animated_text/pretty_animated_text.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'main.dart';
 import 'constens/keys.dart';
-
 
 class Splash extends StatefulWidget {
   const Splash({super.key});
@@ -28,8 +22,6 @@ class Splash extends StatefulWidget {
 }
 
 int pageNum = DateTime.now().second;
-
-
 
 class _SplashState extends State<Splash> {
   bool isLoading = true;
@@ -70,8 +62,8 @@ class _SplashState extends State<Splash> {
 
       bool isAlreadySaved =
           oldSavedDev.isNotEmpty &&
-              oldSavedDev.length > 3 &&
-              oldSavedDev[3] == androidInfo.id;
+          oldSavedDev.length > 3 &&
+          oldSavedDev[3] == androidInfo.id;
 
       if (isAlreadySaved) {
         if (mounted) {
@@ -103,12 +95,12 @@ class _SplashState extends State<Splash> {
             .collection(AppConstants.phone)
             .doc(androidInfo.id.toString())
             .set({
-          "brand": androidInfo.brand,
-          "model": androidInfo.model,
-          "version": androidInfo.version.release,
-          "id": androidInfo.id,
-          "createdAt": FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+              "brand": androidInfo.brand,
+              "model": androidInfo.model,
+              "version": androidInfo.version.release,
+              "id": androidInfo.id,
+              "createdAt": FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true));
 
         await preferences.setStringList('phone', [
           androidInfo.brand,
@@ -149,9 +141,9 @@ class _SplashState extends State<Splash> {
   Future<bool> getMovie() async {
     Uri url = Uri.parse(
       'https://api.themoviedb.org/3/movie/popular'
-          '?api_key=${AppConstants.apiKey}'
-          '&sort_by=popularity.desc'
-          '&page=$pageNum',
+      '?api_key=${AppConstants.apiKey}'
+      '&sort_by=popularity.desc'
+      '&page=$pageNum',
     );
 
     int attempts = 0;
@@ -268,10 +260,7 @@ class _SplashState extends State<Splash> {
                           decoration: BoxDecoration(
                             color: Colors.red.withOpacity(0.2),
                             borderRadius: BorderRadius.circular(wt * 0.02),
-                            border: Border.all(
-                              color: Colors.red,
-                              width: 1.5,
-                            ),
+                            border: Border.all(color: Colors.red, width: 1.5),
                           ),
                           child: Padding(
                             padding: EdgeInsets.symmetric(

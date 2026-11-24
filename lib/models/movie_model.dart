@@ -1,5 +1,3 @@
-import 'package:flutter/cupertino.dart';
-
 class Movie {
   final int movId;
   final String title;
@@ -15,8 +13,8 @@ class Movie {
     required this.img,
     required this.year,
     required this.rating,
-    required this.timeStamp, required this.delete,
-
+    required this.timeStamp,
+    required this.delete,
   });
 
   // copyWith
@@ -27,7 +25,7 @@ class Movie {
     String? year,
     double? rating,
     DateTime? timeStamp,
-    bool? delete
+    bool? delete,
   }) {
     return Movie(
       movId: id ?? movId,
@@ -35,8 +33,8 @@ class Movie {
       img: img ?? this.img,
       year: year ?? this.year,
       rating: rating ?? this.rating,
-      timeStamp: timeStamp??this.timeStamp,
-      delete: delete??this.delete
+      timeStamp: timeStamp ?? this.timeStamp,
+      delete: delete ?? this.delete,
     );
   }
 
@@ -49,7 +47,7 @@ class Movie {
       year: map['year'] ?? '',
       rating: (map['rating'] ?? 0).toDouble(),
       timeStamp: map['timeStamp'] ?? DateTime.now(),
-      delete: map['delete']??false
+      delete: map['delete'] ?? false,
     );
   }
 
@@ -62,7 +60,7 @@ class Movie {
       'year': year,
       'rating': rating,
       'timeStamp': timeStamp,
-      'delete': delete
+      'delete': delete,
     };
   }
 }
