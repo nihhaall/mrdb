@@ -6,10 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:mrdb/constens/keys.dart';
 import 'package:mrdb/home/bottom_nav.dart';
+import 'package:mrdb/home/navs/owner/manage_clients_page.dart';
+import 'package:mrdb/home/navs/owner/telegram_videos_page.dart';
+import 'package:mrdb/services/app_update_service.dart';
+import 'package:mrdb/services/network_service.dart';
+import 'package:mrdb/widgets/app_update_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../main.dart';
-import '../../models/credit_model.dart';
 
 class About extends ConsumerStatefulWidget {
   const About({super.key});
@@ -19,569 +23,773 @@ class About extends ConsumerStatefulWidget {
 }
 
 class _AboutState extends ConsumerState<About> {
-  bool isLoading=true;
-  bool deletingAc=false;
-  List device=[];
-  List reDirecting=[];
-  Future<void> getPhoneDetails() async {
-   try{
-     SharedPreferences preferences = await SharedPreferences.getInstance();
-     List<String>? phoneData = preferences.getStringList('phone');
-     setState(() {
-       device = phoneData??['Unknown', 'Unknown Model', 'Unknown Version', 'Unknown ID'];
-       isLoading=false;
-     });
-   }catch(e){
-     setState(() {
-       device = ['Unknown', 'Unknown Model', 'Unknown Version', 'Unknown ID'];
-       isLoading = false;
-     });
-   }
-  }
-  Future<void> nav({required String url}) async {
-    Uri ur;
-    if(url.contains('@')){
-      ur=Uri(
-        scheme: 'mailto',
-        path: url,
-        queryParameters: {
-          'subject': 'Hello!,Nihal',
-          'body': 'MRDb ...'
-        },
-      );
-    }else{
-      ur = Uri.parse(url);
-    }
-    if(await canLaunchUrl(ur)){
-      await launchUrl(ur);
-    }
-  }
-  
-  Future<void> deleteAccount() async{
-    setState(() {
-      deletingAc=true;
-    });
-    DocumentReference query=FirebaseFirestore.instance.collection(AppConstants.phone).doc(device[3]);
-    SharedPreferences pref = await SharedPreferences.getInstance();
-    pref.clear();
-    var liked = await query.collection('liked').get();
-    for(var like in liked.docs){
-      await query.collection('liked').doc(like.id).delete();
-    }
-    await query.delete();
-    setState(() {
-      deletingAc=false;
-    });
-    SystemNavigator.pop();
-  }
+  bool _isLoading = true;
+  bool _isOwner = false;
+  bool _isCheckingUpdate = false;
+  String _appVersion = '1.0.0';
+  List<String> _device = ['Unknown', 'Unknown Model', 'Unknown Version', 'Unknown ID'];
+
+  static const Color _kBgColor = Color(0xFF0D0D14);
+  static const Color _kCardBg = Color(0xFF151821);
+  static const Color _kCardBorder = Color(0xFF202534);
+  static const Color _kAccent = Color(0xFF00E5A0);
+  static const Color _kTextPrimary = Color(0xFFE6EDF3);
+  static const Color _kTextSecondary = Color(0xFF8B949E);
+
   @override
   void initState() {
-    getPhoneDetails();
     super.initState();
+    _loadDeviceDetails();
   }
-  @override
-  build(BuildContext context) {
-    List<InfoModel> getCredits() {
-      return [
-        InfoModel(
-          icon: Amicons.remix_admin,
-          topTxt: 'Developer',
-          centreTxt: 'Nihal M',
-          subTxt: 'Mobile App Developer',
-        ),
-        InfoModel(
-          icon: Amicons.flaticon_chart_network_rounded,
-          topTxt: 'API Provider',
-          centreTxt: 'The Movie Database (TMDB)',
-          subTxt: 'Movie Details Scrap',
-        ),
-        InfoModel(
-          icon: Amicons.remix_flutter,
-          topTxt: 'Design Inspiration',
-          centreTxt: 'Material Design',
-          subTxt: 'UI/UX Guideline',
-        ),
-      ];
-    }
-    List<InfoModel> getSupportOptions(){
-      return [
-        InfoModel(
-            icon: Amicons.lucide_mail,
-            centreTxt: 'Contact Mail',
-            lastTxt: 'Redirecting to Mail Box...',
-            subTxt: 'nihalthoppil16@gmail.com',
-            onTap: 'nihalthoppil16@gmail.com'
-        ),
-        InfoModel(
-            icon: Amicons.lucide_instagram,
-            centreTxt: 'Instagram',
-            lastTxt: 'Redirecting to Instagram...',
-            subTxt: 'nihh____al',
-            onTap: 'https://www.instagram.com/nihh____al'
-        ),
-        InfoModel(
-            icon: Amicons.remix_whatsapp,
-            centreTxt: 'WhatsApp',
-            lastTxt: 'Redirecting to WhatsApp...',
-            subTxt: '+91 9605945341',
-            onTap: 'https://wa.me/919605945341'
-        ),
-      ];
-    }
-    List<InfoModel> getDeviceInfo(){
-      while (device.length < 4) {
-        device.add('Unknown');
-      }
-      return [
-        InfoModel(
-          icon: Amicons.vuesax_device_message,
-          centreTxt: 'Brand',
-          lastTxt: device[0].toString().toUpperCase(),
-        ),
-        InfoModel(
-          icon: Amicons.remix_android,
-          centreTxt: 'Model',
-          lastTxt: device[1]
-      ),
-        InfoModel(
-          icon: Amicons.flaticon_apps_sharp,
-          centreTxt: 'Android Version',
-          lastTxt:  device[2]
-      ),
-        InfoModel(
-          icon: Amicons.iconly_danger_circle,
-          centreTxt: 'Device Id',
-          lastTxt:  device[3]
-      ),
-      ];
-    }
-    List<InfoModel> credits = getCredits();
-    List<InfoModel> support = getSupportOptions();
-    List<InfoModel> deviceInfo = getDeviceInfo();
 
+  Future<void> _loadDeviceDetails() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final phoneData = preferences.getStringList('phone');
+      final cachedOwner = preferences.getBool('is_owner') ?? false;
+      final pkg = await AppUpdateService.instance.getPackageInfo();
+
+      if (mounted) {
+        setState(() {
+          _appVersion = pkg.version;
+          _isOwner = cachedOwner;
+          if (phoneData != null && phoneData.isNotEmpty) {
+            _device = List<String>.from(phoneData);
+            while (_device.length < 4) {
+              _device.add('Unknown');
+            }
+          }
+          _isLoading = false;
+        });
+      }
+
+      // Check Firestore client document for owner field
+      final clientId = _device.length > 3 ? _device[3] : null;
+      if (clientId != null &&
+          clientId != 'Unknown' &&
+          clientId.isNotEmpty &&
+          await NetworkService.instance.hasInternet()) {
+        final doc = await FirebaseFirestore.instance
+            .collection(AppConstants.phone)
+            .doc(clientId)
+            .get()
+            .timeout(const Duration(seconds: 5));
+        if (doc.exists) {
+          final data = doc.data();
+          final isOwner = data?['owner'] == true;
+          await preferences.setBool('is_owner', isOwner);
+          if (mounted && _isOwner != isOwner) {
+            setState(() {
+              _isOwner = isOwner;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Owner check error: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _launchExternalUrl(String url) async {
+    HapticFeedback.lightImpact();
+    try {
+      Uri uri;
+      if (url.contains('@') && !url.startsWith('http')) {
+        uri = Uri(
+          scheme: 'mailto',
+          path: url,
+          queryParameters: {
+            'subject': 'MRDb App Feedback',
+            'body': 'Hi Nihal,\n\nI am reaching out regarding MRDb...',
+          },
+        );
+      } else {
+        if (!await NetworkService.instance.hasInternet()) {
+          if (mounted) {
+            showScaffoldMsg(context, txt: 'No internet connection');
+          }
+          return;
+        }
+        uri = Uri.parse(url);
+      }
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          showScaffoldMsg(context, txt: 'Could not open link');
+        }
+      }
+    } catch (_) {
+      if (mounted) {
+        showScaffoldMsg(context, txt: 'Error opening link');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        ref.read(currentIndexProvider.notifier).state=0;
+        ref.read(currentIndexProvider.notifier).state = 0;
       },
       child: Scaffold(
-        backgroundColor: Colors.black,
+        backgroundColor: _kBgColor,
         appBar: AppBar(
-          backgroundColor: Colors.black,
-          title: Text('About'),
-          titleTextStyle: TextStyle(
-            color: Colors.grey.shade400,
-            fontSize: wt * 0.05,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        body: Padding(
-          padding: EdgeInsets.all(wt * 0.04),
-          child: Center(
-            child: SingleChildScrollView(
-              child: isLoading?LoadingAnimationWidget.threeArchedCircle(color: Colors.green, size: wt*0.2):SizedBox(
-                width: wt * 1,
-                height: ht * 2.1,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: wt * 0.9,
-                      height: ht * 0.4,
-                      decoration: BoxDecoration(
-                        color: Colors.pink.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(wt * 0.05),
-                        border: Border.all(
-                          color: Colors.pink.withOpacity(0.5),
-                          width: 2
-                        )
-                      ),
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: wt * 0.05,
-                          vertical: wt * 0.06,
-                        ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadiusGeometry.circular(
-                                wt * 0.025,
-                              ),
-                              child: Image.asset(
-                                'assets/images/logo.jpg',
-                                width: wt * 0.3,
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                            Text(
-                              'Version 1.0.0',
-                              style: TextStyle(
-                                color: Colors.white30,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            Text(
-                              'A Movie Research Database App, Find All Movies and Get Detailed information Via this App',
-                              maxLines: 3,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: Colors.white38,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    Container(
-                      width: wt * 0.9,
-                      height: ht * 0.47,
-                      decoration: BoxDecoration(
-                        color: Colors.green.withOpacity(0.07),
-                        borderRadius: BorderRadius.circular(wt * 0.05),
-                        border: Border.all(
-                          color: Colors.green.withOpacity(0.5),
-                          width: 1.4
-                        )
-                      ),
-                      child: Padding(
-                        padding: EdgeInsets.all(wt * 0.05),
-                        child: Column(
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.start,
-                                  children: [
-                                    Icon(
-                                      Amicons.remix_android,
-                                      color: Colors.green.shade800.withOpacity(0.7),
-                                    ),
-                                    SizedBox(width: wt * 0.05),
-                                    Text(
-                                      'Device Information',
-                                      style: TextStyle(
-                                        color: Colors.green.withOpacity(0.7),
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                InkWell(
-                                    onTap: () {
-                                      Clipboard.setData(ClipboardData(text: device.join(', ')));
-                                      showScaffoldMsg(context, txt: 'Copied to clipboard');
-                                    },
-                                    child: Icon(Amicons.lucide_copy,color: Colors.green.shade400,))
-                              ],
-                            ),
-                            SizedBox(height: ht*0.04,),
-                            Expanded(
-                              child: ListView.builder(
-                                itemCount: deviceInfo.length,
-                                itemBuilder: (context, index) {
-                                  InfoModel data = deviceInfo[index];
-                                  return Column(
-                                    children: [
-                                      Container(
-                                        width: wt*1,
-                                        height: ht*0.07,
-                                        decoration: BoxDecoration(
-                                            color: Colors.green.withOpacity(0.03),
-                                            border: Border.all(
-                                                color: Colors.green.withOpacity(0.2),
-                                                width: 1
-                                            ),
-                                            borderRadius: BorderRadius.circular(wt*0.03)
-                                        ),
-                                        child: ListTile(
-                                          title: Text(
-                                            data.centreTxt,
-                                            maxLines: 2,
-                                            style: TextStyle(
-                                                color: Colors.green,
-                                                fontSize: wt*0.035,
-                                                fontWeight: FontWeight.bold
-                                            ),
-                                          ),
-                                          leading: Icon(data.icon,size: wt*0.06,color: Colors.green.shade400,),
-                                          trailing: Text(
-                                            data.lastTxt.toString(),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: TextStyle(
-                                                color: Colors.lightGreen.shade600,
-                                                fontSize: wt*0.034
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      SizedBox(height: ht*0.02,)
-                                    ],
-                                  );
-                                },
-                                physics: NeverScrollableScrollPhysics(),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    Container(
-                      width: wt * 0.9,
-                      height: ht * 0.59,
-                      decoration: BoxDecoration(
-                        color: Colors.orangeAccent.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(wt * 0.05),
-                        border: Border.all(
-                          color: Colors.orangeAccent.withOpacity(0.5),
-                          width: 1.5
-                        )
-                      ),
-                      child: Padding(
-                        padding: EdgeInsets.all(wt * 0.04),
-                        child: Column(
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.start,
-                              children: [
-                                Icon(
-                                  Amicons.vuesax_personalcard,
-                                  color: Colors.orange.shade800.withOpacity(0.7),
-                                ),
-                                SizedBox(width: wt * 0.05),
-                                Text(
-                                  'Credits',
-                                  style: TextStyle(
-                                    color: Colors.orangeAccent.shade400,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: wt*0.045
-                                  ),
-                                ),
-                              ],
-                            ),
-                            SizedBox(height: ht*0.045,),
-                            Expanded(
-                              child: ListView.builder(
-                                physics: NeverScrollableScrollPhysics(),
-                                  itemCount: credits.length,
-                                  itemBuilder: (context, index) {
-                                  InfoModel data=credits[index];
-                                    return Column(
-                                      children: [
-                                        Container(
-                                          width: wt*1,
-                                          height: ht*0.14,
-                                          decoration: BoxDecoration(
-                                              color: Colors.orangeAccent.withOpacity(0.03),
-                                              border: Border.all(
-                                                  color: Colors.orangeAccent.withOpacity(0.2),
-                                                  width: 2
-                                              ),
-                                              borderRadius: BorderRadius.circular(wt*0.03)
-                                          ),
-                                          child: ListTile(
-                                            titleAlignment: ListTileTitleAlignment.center,
-                                            leading: Icon(data.icon),
-                                            title: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Text(data.topTxt.toString(),
-                                                  style: TextStyle(
-                                                      color: Colors.orangeAccent.shade700.withOpacity(0.4),
-                                                      fontWeight: FontWeight.bold,
-                                                      fontSize: wt*0.045
-                                                  ),
-                                                ),
-                                                SizedBox(height: ht*0.01,),
-                                                Text(data.centreTxt,maxLines:1,overflow: TextOverflow.ellipsis, style: TextStyle(
-                                                    color: Colors.orangeAccent.withOpacity(0.7),
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: wt*0.04
-                                                ),),
-                                                Text(data.subTxt.toString(),
-                                                  style: TextStyle(
-                                                      color: Colors.orange.withOpacity(0.5),
-                                                      fontSize: wt*0.03
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                        SizedBox(height: ht*0.02,)
-                                      ],
-                                    );
-                                  },
-                              ),
-                            ),
-
-                          ],
-                        ),
-                      ),
-                    ),
-                    Container(
-                      width: wt * 0.9,
-                      height: ht * 0.45,
-                      decoration: BoxDecoration(
-                        color: Colors.tealAccent.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(wt * 0.05),
-                        border: Border.all(
-                          color: Colors.tealAccent.withOpacity(0.4),
-                          width: 1.5
-                        )
-                      ),
-                      child: Padding(
-                        padding: EdgeInsets.all(wt*0.04),
-                        child: Column(
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.start,
-                              children: [
-                                Icon(
-                                  Amicons.lucide_message_square_more,
-                                  color: Colors.teal,
-                                ),
-                                SizedBox(width: wt * 0.05),
-                                Text(
-                                  'Support Us',
-                                  style: TextStyle(
-                                    color: Colors.teal.shade700,
-                                    fontSize: wt*0.045,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            SizedBox(height: ht*0.03,),
-                            Expanded(
-                              child: ListView.builder(
-                                physics: NeverScrollableScrollPhysics(),
-                                itemCount: support.length,
-                                  itemBuilder: (context, index) {
-                                  InfoModel data = support[index];
-                                    return Column(
-                                      children: [
-                                        Container(
-                                          width: wt*1,
-                                          height: ht*0.1,
-                                          decoration: BoxDecoration(
-                                            color: Colors.teal.withOpacity(0.1),
-                                            border: Border.all(
-                                              color: Colors.teal.withOpacity(0.2),
-                                              width: 2
-                                            ),
-                                            borderRadius: BorderRadius.circular(wt*0.03)
-                                          ),
-                                          child: InkWell(
-                                            splashColor: Colors.green.withOpacity(0.1),
-                                            highlightColor: Colors.green.withOpacity(0.1),
-                                              borderRadius: BorderRadius.circular(wt*0.02),
-                                            onTap: () async {
-                                              setState(() {
-                                                reDirecting.add(index);
-                                                showScaffoldMsg(context, txt: data.lastTxt.toString());
-                                              });
-                                              await Future.delayed(Duration(seconds: 2));
-                                              await nav(url: data.onTap.toString());
-                                              setState(() {
-                                                reDirecting.remove(index);
-                                              });
-                                            },
-                                            child: ListTile(
-                                              trailing: reDirecting.contains(index)?LoadingAnimationWidget.dotsTriangle(color: Colors.teal, size: wt*0.05):Icon(Amicons.vuesax_arrow_right,size: wt*0.08,color: Colors.teal,),
-                                              titleAlignment: ListTileTitleAlignment.center,
-                                              title: Text(data.centreTxt,style: TextStyle(
-                                                color: Colors.tealAccent,
-                                                fontWeight: FontWeight.bold
-                                              ),),
-                                              subtitle: Text(data.subTxt.toString(),overflow: TextOverflow.ellipsis, style: TextStyle(
-                                                color: Colors.teal.withOpacity(0.7)
-                                              ),),
-                                              leading: Icon(data.icon,color: Colors.teal.shade400,),
-                                            ),
-                                          ),
-                                        ),
-                                        SizedBox(height: ht*0.02,),
-
-                                      ],
-                                    );
-                                  },
-                              ),
-                            )
-                          ],
-                        ),
-                      ),
-                    ),
-                    TextButton(
-                        onPressed: () {
-                          showDialog(
-                              context: context,
-                              builder: (context) {
-                                return AlertDialog(
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(wt*0.05),
-                                    side: BorderSide(
-                                      color: Colors.white.withOpacity(0.5)
-                                    )
-                                  ),
-                                  backgroundColor: Colors.black,
-                                  title: Text('Delete Account?',style: TextStyle(
-                                    color: Colors.white70
-                                  ),),
-                                  content: Text(
-                                    'If you delete the account, then your favorites will be cleared.',
-                                    style: TextStyle(
-                                      color: Colors.grey,
-                                      fontWeight: FontWeight.bold
-                                    ),
-                                  ),
-                                  actionsAlignment: MainAxisAlignment.spaceBetween,
-                                  actionsPadding: EdgeInsets.only(
-                                    right: wt*0.04,
-                                    left: wt*0.04,
-                                    bottom: wt*0.02
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () {
-                                        Navigator.of(context).pop();
-                                      },
-                                      child: Text('Cancel',style: TextStyle(
-                                        color: Colors.lightBlueAccent.shade700,
-                                      ),),
-                                    ),
-                                    TextButton(
-                                      onPressed: () {
-                                        Navigator.pop(context);
-                                        deleteAccount();
-                                      },
-                                      child: Text(
-                                        'Delete',
-                                        style: TextStyle(color: Colors.red),
-                                      ),
-                                    ),
-                                  ],
-                                );
-                              },
-                          );
-                        },
-                        child:deletingAc?LoadingAnimationWidget.inkDrop(color: Colors.red, size: wt*0.06) :Text('Delete Account',style: TextStyle(
-                            color: Colors.red.withOpacity(0.6),
-                          fontWeight: FontWeight.bold
-                        ),)
-                    )
-                  ],
-                ),
-              ),
+          backgroundColor: _kBgColor,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          title: const Text(
+            'About',
+            style: TextStyle(
+              color: _kTextPrimary,
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ),
+        body: _isLoading
+            ? Center(
+                child: LoadingAnimationWidget.threeArchedCircle(
+                  color: _kAccent,
+                  size: 36,
+                ),
+              )
+            : SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 10),
+                    _buildHeader(),
+                    const SizedBox(height: 22),
+                    _buildQuickContactRow(),
+                    const SizedBox(height: 18),
+                    _buildUpdateCheckCard(),
+                    const SizedBox(height: 12),
+                    _buildTelegramStreamButton(),
+                    const SizedBox(height: 16),
+                    _buildDetailsCard(),
+                    if (_isOwner) ...[
+                      const SizedBox(height: 16),
+                      _buildManageClientsButton(),
+                      const SizedBox(height: 12),
+                      _buildDeviceCompactCard(),
+                    ],
+                    const SizedBox(height: 26),
+                    _buildFooterSignature(),
+                    const SizedBox(height: 100),
+                  ],
+                ),
+              ),
+      ),
+    );
+  }
+
+  // ── Footer Signature (Minimal Dark Brandmark) ──────────────────────────────
+  Widget _buildFooterSignature() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      decoration: BoxDecoration(
+        color: const Color(0xFF11131A),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF1E222D), width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: Image.asset(
+              'assets/images/mrdb_logo.png',
+              width: 15,
+              height: 15,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) => const Icon(
+                Icons.movie_rounded,
+                color: Color(0xFF8B949E),
+                size: 14,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text(
+            'MRDb',
+            style: TextStyle(
+              color: Color(0xFFE6EDF3),
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
+            ),
+          ),
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            width: 1,
+            height: 10,
+            color: const Color(0xFF2C3240),
+          ),
+          const Text(
+            'Made by Nihal M',
+            style: TextStyle(
+              color: Color(0xFF8B949E),
+              fontSize: 11.5,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Header: Logo & Title ──────────────────────────────────────────────────
+  Widget _buildHeader() {
+    return Column(
+      children: [
+        Container(
+          width: 74,
+          height: 74,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF11131A),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: const Color(0xFF202432), width: 1.2),
+          ),
+          child: Image.asset(
+            'assets/images/mrdb_logo.png',
+            fit: BoxFit.contain,
+            errorBuilder: (context, error, stackTrace) => const Center(
+              child: Icon(Icons.movie_rounded, color: _kAccent, size: 36),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'MRDb',
+              style: TextStyle(
+                color: _kTextPrimary,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+              decoration: BoxDecoration(
+                color: _kAccent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: _kAccent.withValues(alpha: 0.25), width: 0.8),
+              ),
+              child: Text(
+                'v$_appVersion',
+                style: const TextStyle(
+                  color: _kAccent,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Movie Research Database',
+          style: TextStyle(
+            color: _kTextSecondary,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── 3 Quick Connect Buttons in a Row ───────────────────────────────────────
+  Widget _buildQuickContactRow() {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildConnectButton(
+            icon: Amicons.lucide_mail,
+            label: 'Email',
+            color: const Color(0xFF64D2FF),
+            onTap: () => _launchExternalUrl('nihalthoppil16@gmail.com'),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _buildConnectButton(
+            icon: Amicons.remix_whatsapp,
+            label: 'WhatsApp',
+            color: const Color(0xFF25D366),
+            onTap: () => _launchExternalUrl('https://wa.me/919605945341'),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _buildConnectButton(
+            icon: Amicons.lucide_instagram,
+            label: 'Instagram',
+            color: const Color(0xFFFF6492),
+            onTap: () => _launchExternalUrl('https://www.instagram.com/nihh____al'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildConnectButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: _kCardBg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _kCardBorder),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 18),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                color: _kTextPrimary,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleCheckForUpdates() async {
+    if (_isCheckingUpdate) return;
+    HapticFeedback.lightImpact();
+    setState(() => _isCheckingUpdate = true);
+
+    try {
+      final hasNet = await NetworkService.instance.hasInternet(
+        forceRefresh: true,
+      );
+      if (!hasNet) {
+        if (mounted) {
+          showScaffoldMsg(context, txt: 'No internet connection');
+        }
+        return;
+      }
+
+      final update = await AppUpdateService.instance.checkForUpdate(
+        forceCheck: true,
+      );
+      if (!mounted) return;
+      if (update != null) {
+        await AppUpdateSheet.show(context, update);
+      } else {
+        showScaffoldMsg(
+          context,
+          txt: 'You are on the latest version (v$_appVersion)',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isCheckingUpdate = false);
+    }
+  }
+
+  Widget _buildUpdateCheckCard() {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: _isCheckingUpdate ? null : _handleCheckForUpdates,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: _kCardBg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _kCardBorder),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _kAccent.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                Icons.system_update_rounded,
+                color: _kAccent,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Check for App Updates',
+                    style: TextStyle(
+                      color: _kTextPrimary,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Current version v$_appVersion',
+                    style: const TextStyle(
+                      color: _kTextSecondary,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_isCheckingUpdate)
+              LoadingAnimationWidget.threeArchedCircle(
+                color: _kAccent,
+                size: 18,
+              )
+            else
+              const Icon(
+                Icons.arrow_forward_ios_rounded,
+                color: _kTextSecondary,
+                size: 14,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Combined App Credits ───────────────────────────────────────────────────
+  Widget _buildDetailsCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: _kCardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _kCardBorder),
+      ),
+      child: Column(
+        children: [
+          _buildRowItem(
+            icon: Amicons.remix_admin,
+            iconColor: const Color(0xFFFF9F1C),
+            label: 'Developer',
+            value: 'Nihal M',
+          ),
+          const Divider(height: 1, indent: 52, endIndent: 16, color: Color(0xFF1E2230)),
+          _buildRowItem(
+            icon: Icons.movie_filter_rounded,
+            iconColor: _kAccent,
+            label: 'Movie Metadata',
+            value: 'The Movie Database (TMDB)',
+          ),
+          const Divider(height: 1, indent: 52, endIndent: 16, color: Color(0xFF1E2230)),
+          _buildRowItem(
+            icon: Amicons.remix_flutter,
+            iconColor: const Color(0xFF54C5F8),
+            label: 'Framework',
+            value: 'Flutter & Material 3',
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Manage Clients Button (Owner Only) ───────────────────────────────────
+  Widget _buildManageClientsButton() {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () {
+        HapticFeedback.lightImpact();
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const ManageClientsPage(),
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: _kCardBg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _kAccent.withValues(alpha: 0.35)),
+          boxShadow: [
+            BoxShadow(
+              color: _kAccent.withValues(alpha: 0.08),
+              blurRadius: 14,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _kAccent.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.people_alt_rounded, color: _kAccent, size: 20),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'Manage Clients',
+                        style: TextStyle(
+                          color: _kTextPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(width: 6),
+                      Icon(Icons.admin_panel_settings_rounded, color: Colors.amber, size: 16),
+                    ],
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'View all registered devices & their liked movies',
+                    style: TextStyle(
+                      color: _kTextSecondary,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.arrow_forward_ios_rounded,
+              color: _kAccent,
+              size: 14,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Telegram Cloud Stream Button (Owner Only) ────────────────────────────
+  Widget _buildTelegramStreamButton() {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () {
+        HapticFeedback.lightImpact();
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const TelegramVideosPage(),
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: _kCardBg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF64D2FF).withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF64D2FF).withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                Icons.cloud_download_rounded,
+                color: Color(0xFF64D2FF),
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Telegram Cloud Stream',
+                    style: TextStyle(
+                      color: _kTextPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Stream .mkv & video links from @FileToSpeedLink_Bot',
+                    style: TextStyle(
+                      color: _kTextSecondary,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.arrow_forward_ios_rounded,
+              color: Color(0xFF64D2FF),
+              size: 14,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Compact Device Info ────────────────────────────────────────────────────
+  Widget _buildDeviceCompactCard() {
+    final brand = _device[0].toUpperCase();
+    final model = _device[1];
+    final androidVer = _device[2];
+    final deviceId = _device[3];
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: _kCardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _kCardBorder),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF64D2FF).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.phone_android_rounded, color: Color(0xFF64D2FF), size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        '$brand $model',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _kTextPrimary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: Colors.amber.withValues(alpha: 0.3),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: const Text(
+                        'Owner',
+                        style: TextStyle(
+                          color: Colors.amber,
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                Text(
+                  'Android $androidVer • $deviceId',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _kTextSecondary,
+                    fontSize: 11.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: Icon(Icons.copy_rounded, color: _kAccent.withValues(alpha: 0.8), size: 17),
+            tooltip: 'Copy device details',
+            onPressed: () {
+              HapticFeedback.lightImpact();
+              Clipboard.setData(
+                ClipboardData(text: 'Brand: $brand\nModel: $model\nOS: Android $androidVer\nDevice ID: $deviceId'),
+              );
+              showScaffoldMsg(context, txt: 'Device info copied');
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRowItem({
+    required IconData icon,
+    required Color iconColor,
+    required String label,
+    required String value,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Icon(icon, color: iconColor, size: 20),
+          const SizedBox(width: 14),
+          Text(
+            label,
+            style: const TextStyle(
+              color: _kTextSecondary,
+              fontSize: 13,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: const TextStyle(
+              color: _kTextPrimary,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }

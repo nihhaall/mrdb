@@ -6,6 +6,10 @@ import 'package:flutter_riverpod/legacy.dart';
 import 'package:mrdb/home/navs/about.dart';
 import 'package:mrdb/home/navs/fav.dart';
 import 'package:mrdb/home/navs/first_page/home_page.dart';
+import 'package:mrdb/main.dart';
+import 'package:mrdb/services/app_update_service.dart';
+import 'package:mrdb/services/release_notification_service.dart';
+import 'package:mrdb/widgets/app_update_sheet.dart';
 
 // ─── Enums & Providers ────────────────────────────────────────────────────────
 enum HomeReleaseCategory { nowReleased, upcoming }
@@ -24,11 +28,26 @@ class MainScreen extends ConsumerStatefulWidget {
 }
 
 class _MainScreenState extends ConsumerState<MainScreen> {
-  final List<Widget> pages = [
-    const HomePage(),
-    const Favorite(),
-    const About(),
-  ];
+  late final List<Widget> pages;
+
+  @override
+  void initState() {
+    super.initState();
+    pages = [
+      HomePage(lang: userDeviceLanguageCode),
+      const Favorite(),
+      const About(),
+    ];
+    ReleaseNotificationService.instance.initialize();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkAppUpdate());
+  }
+
+  Future<void> _checkAppUpdate() async {
+    final update = await AppUpdateService.instance.checkForUpdate();
+    if (update != null && mounted) {
+      await AppUpdateSheet.show(context, update);
+    }
+  }
 
   static const Color _kAccent = Color(0xFF00E5A0);
   static const Color _kUpcomingAccent = Color(0xFFFF9F1C);

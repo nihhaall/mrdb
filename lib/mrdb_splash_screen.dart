@@ -74,7 +74,13 @@ class _MrdbSplashScreenState extends State<MrdbSplashScreen>
     try {
       await Future.wait([
         Future<void>.delayed(widget.minDisplayDuration),
-        if (widget.onInit != null) widget.onInit!(),
+        if (widget.onInit != null)
+          widget.onInit!().timeout(
+            const Duration(seconds: 6),
+            onTimeout: () {
+              debugPrint('MRDb splash init timed out, proceeding to app');
+            },
+          ),
       ]);
     } catch (e) {
       debugPrint('MRDb splash init error: $e');

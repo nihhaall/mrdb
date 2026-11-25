@@ -1,13 +1,12 @@
-import 'dart:convert';
-
+import 'dart:async';
 import 'package:amicons/amicons.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:mrdb/home/bottom_nav.dart';
 import 'package:mrdb/provider/client.dart';
+import 'package:mrdb/services/network_service.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -139,41 +138,20 @@ class _SplashState extends State<Splash> {
   }
 
   Future<bool> getMovie() async {
-    Uri url = Uri.parse(
-      'https://api.themoviedb.org/3/movie/popular'
-      '?api_key=${AppConstants.apiKey}'
-      '&sort_by=popularity.desc'
-      '&page=$pageNum',
-    );
-
-    int attempts = 0;
-
-    while (attempts < 3) {
-      try {
-        final res = await http.get(url);
-
-        if (res.statusCode == 200) {
-          final data = jsonDecode(res.body);
-
-          if (data['results'] != null) {
-            all.addAll(data['results']);
-            return true;
-          } else {
-            attempts++;
-          }
-        } else {
-          attempts++;
-        }
-      } catch (e) {
-        debugPrint('Movie fetch error (attempt ${attempts + 1}): $e');
-        attempts++;
-
-        if (attempts < 3) {
-          await Future.delayed(const Duration(seconds: 1));
-        }
+    final safePage = pageNum < 1 ? 1 : pageNum;
+    try {
+      final data = await NetworkService.instance.getTmdbJson(
+        '/3/movie/popular?api_key=${AppConstants.apiKey}&sort_by=popularity.desc&page=$safePage',
+        timeout: const Duration(seconds: 8),
+        maxAttempts: 2,
+      );
+      if (data is Map && data['results'] is List) {
+        all.addAll(data['results'] as List);
+        return true;
       }
+    } catch (e) {
+      debugPrint('Movie fetch error: $e');
     }
-
     return false;
   }
 
@@ -200,10 +178,10 @@ class _SplashState extends State<Splash> {
                 width: wt * 0.45,
                 height: ht * 0.2,
                 decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.15),
+                  color: Colors.green.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(wt * 0.03),
                   border: Border.all(
-                    color: Colors.green.withOpacity(0.6),
+                    color: Colors.green.withValues(alpha: 0.6),
                     width: 2,
                   ),
                 ),
@@ -258,7 +236,7 @@ class _SplashState extends State<Splash> {
                         },
                         child: Container(
                           decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.2),
+                            color: Colors.red.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(wt * 0.02),
                             border: Border.all(color: Colors.red, width: 1.5),
                           ),
