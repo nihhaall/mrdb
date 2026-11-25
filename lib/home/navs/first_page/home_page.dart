@@ -9,6 +9,7 @@ import 'package:fluttertoast/fluttertoast.dart';
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:mrdb/home/navs/first_page/preview_page.dart';
 import 'package:mrdb/home/navs/first_page/random_movie_page.dart';
+import 'package:mrdb/home/navs/owner/telegram_videos_page.dart';
 import 'package:mrdb/constens/keys.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mrdb/home/bottom_nav.dart';
@@ -93,6 +94,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   // Controllers
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
   final PageController _heroCarouselController = PageController();
   final ValueNotifier<bool> _showScrollToTop = ValueNotifier<bool>(false);
@@ -147,6 +149,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     _reconnectTimer?.cancel();
     _heroCarouselController.dispose();
     _searchController.dispose();
+    _searchFocusNode.dispose();
     _scrollController.removeListener(_onScrollPositionChanged);
     _scrollController.dispose();
     _showScrollToTop.dispose();
@@ -467,6 +470,10 @@ class _HomePageState extends ConsumerState<HomePage> {
       voteParam = '&vote_count.gte=2';
     }
 
+    final sortParam = _releaseCategory == HomeReleaseCategory.upcoming
+        ? '&sort_by=primary_release_date.asc'
+        : '&sort_by=popularity.desc';
+
     return Uri.parse(
       'https://api.themoviedb.org/3/discover/movie'
       '?api_key=${AppConstants.apiKey}'
@@ -474,7 +481,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       '$genreParam'
       '$dateParam'
       '$voteParam'
-      '&sort_by=popularity.desc'
+      '$sortParam'
       '&page=$targetPage',
     );
   }
@@ -568,7 +575,27 @@ class _HomePageState extends ConsumerState<HomePage> {
         onSlowConnection: _markSlowConnection,
       );
       if (!mounted) return;
-      final results = (data is Map ? data['results'] : null) as List<dynamic>? ?? [];
+      List<dynamic> results =
+          (data is Map ? data['results'] : null) as List<dynamic>? ?? [];
+      if (_releaseCategory == HomeReleaseCategory.upcoming) {
+        final now = DateTime.now();
+        final todayStart = DateTime(now.year, now.month, now.day);
+        results = results.where((item) {
+          if (item is! Map) return false;
+          final rawDate = (item['release_date'] ?? '').toString().trim();
+          final parsed = DateTime.tryParse(rawDate);
+          if (parsed == null) return false;
+          return !parsed.isBefore(todayStart);
+        }).toList()
+          ..sort((a, b) {
+            final da = DateTime.tryParse((a['release_date'] ?? '').toString());
+            final db = DateTime.tryParse((b['release_date'] ?? '').toString());
+            if (da == null && db == null) return 0;
+            if (da == null) return 1;
+            if (db == null) return -1;
+            return da.compareTo(db);
+          });
+      }
       setState(() {
         _movies = results;
         pageNum = 1;
@@ -710,6 +737,30 @@ class _HomePageState extends ConsumerState<HomePage> {
     return PopScope(
       canPop: tap,
       onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+
+        if (_searchFocusNode.hasFocus ||
+            _isSearching ||
+            _searchController.text.isNotEmpty) {
+          final wasSearching = _isSearching;
+          _searchFocusNode.unfocus();
+          FocusScope.of(context).unfocus();
+          _searchController.clear();
+          if (wasSearching) {
+            setState(() => _isSearching = false);
+            await _onRefresh();
+          } else {
+            setState(() {});
+          }
+          return;
+        }
+
+        if (_releaseCategory == HomeReleaseCategory.upcoming) {
+          ref.read(homeReleaseCategoryProvider.notifier).state =
+              HomeReleaseCategory.nowReleased;
+          return;
+        }
+
         if (!tap) {
           Fluttertoast.showToast(
             msg: 'Press back again to exit',
@@ -721,6 +772,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           tap = true;
         });
         await Future.delayed(const Duration(seconds: 2));
+        if (!mounted) return;
         setState(() {
           tap = false;
         });
@@ -799,6 +851,26 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
             ],
           ),
+          actions: [
+            IconButton(
+              tooltip: 'Stream',
+              icon: const Icon(
+                Icons.play_circle_outline_rounded,
+                color: Color(0xFFF5C451),
+                size: 25,
+              ),
+              onPressed: () {
+                HapticFeedback.lightImpact();
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const TelegramVideosPage(),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(width: 4),
+          ],
         ),
         body: Stack(
                 children: [
@@ -1148,6 +1220,7 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
               child: TextFormField(
                 controller: _searchController,
+                focusNode: _searchFocusNode,
                 textInputAction: TextInputAction.search,
                 onFieldSubmitted: _searchMovies,
                 onChanged: (val) {
@@ -1473,21 +1546,35 @@ class _HomePageState extends ConsumerState<HomePage> {
     double tempMinRating = 6.0;
     bool isSpinning = false;
 
-    showModalBottomSheet(
+    String? activeMood;
+
+    showGeneralDialog(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF14171F),
-      barrierColor: Colors.black.withValues(alpha: 0.7),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
+      barrierDismissible: true,
+      barrierLabel: 'Random Movie Filter',
+      barrierColor: Colors.black.withValues(alpha: 0.78),
+      transitionDuration: const Duration(milliseconds: 240),
+      transitionBuilder: (_, anim, _, child) {
+        final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutBack);
+        return FadeTransition(
+          opacity: anim,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.92, end: 1.0).animate(curved),
+            child: child,
+          ),
+        );
+      },
+      pageBuilder: (ctx, _, _) {
         return StatefulBuilder(
           builder: (sheetCtx, setSheetState) {
-            Future<void> launchRoulette() async {
+            Future<void> launchRoulette({bool skipFilters = false}) async {
               if (isSpinning) return;
               setSheetState(() => isSpinning = true);
               HapticFeedback.heavyImpact();
+
+              final useLang = skipFilters ? null : tempLang;
+              final useGenres = skipFilters ? <int>{} : tempGenres;
+              final useMinRating = skipFilters ? 0.0 : tempMinRating;
 
               List<Map<String, dynamic>> pool = [];
 
@@ -1508,18 +1595,18 @@ class _HomePageState extends ConsumerState<HomePage> {
                       .split('T')
                       .first;
 
-                  final langQ = (tempLang != null && tempLang!.isNotEmpty)
-                      ? '&with_original_language=$tempLang'
+                  final langQ = (useLang != null && useLang.isNotEmpty)
+                      ? '&with_original_language=$useLang'
                       : '';
-                  final genreQ = tempGenres.isNotEmpty
-                      ? '&with_genres=${tempGenres.join(',')}'
+                  final genreQ = useGenres.isNotEmpty
+                      ? '&with_genres=${useGenres.join(',')}'
                       : '';
                   final dateQ =
                       _releaseCategory == HomeReleaseCategory.upcoming
                           ? '&primary_release_date.gte=$today&primary_release_date.lte=$nextYear'
                           : '&primary_release_date.gte=$twoYearsAgo&primary_release_date.lte=$today';
-                  final voteQ = tempMinRating > 0
-                      ? '&vote_average.gte=$tempMinRating&vote_count.gte=5'
+                  final voteQ = useMinRating > 0
+                      ? '&vote_average.gte=$useMinRating&vote_count.gte=5'
                       : '';
 
                   final res = await NetworkService.instance.getTmdbJson(
@@ -1551,18 +1638,18 @@ class _HomePageState extends ConsumerState<HomePage> {
                   if (poster == null || poster.isEmpty || poster == 'null') {
                     return false;
                   }
-                  if (tempLang != null &&
-                      (m['original_language']?.toString() ?? '') != tempLang) {
+                  if (useLang != null &&
+                      (m['original_language']?.toString() ?? '') != useLang) {
                     return false;
                   }
-                  if (tempGenres.isNotEmpty) {
+                  if (useGenres.isNotEmpty) {
                     final ids = (m['genre_ids'] as List? ?? []).toSet();
-                    if (!tempGenres.any(ids.contains)) return false;
+                    if (!useGenres.any(ids.contains)) return false;
                   }
                   final vote = (m['vote_average'] is num)
                       ? (m['vote_average'] as num).toDouble()
                       : 0.0;
-                  return vote >= tempMinRating;
+                  return vote >= useMinRating;
                 }).toList();
               }
 
@@ -1610,101 +1697,178 @@ class _HomePageState extends ConsumerState<HomePage> {
               );
             }
 
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 22),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 36,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: Colors.white24,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Row(
-                        children: [
-                          Icon(
-                            Icons.style_rounded,
-                            color: Color(0xFFFF9F1C),
-                            size: 22,
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            'Surprise Me Roulette',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Filter your mood or spin right away for a random pick.',
-                        style: TextStyle(color: Colors.white54, fontSize: 12.5),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Minimum Rating',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [0.0, 6.0, 7.0, 8.0].map((r) {
-                          final selected = tempMinRating == r;
-                          return Expanded(
-                            child: GestureDetector(
-                              onTap: () {
-                                HapticFeedback.selectionClick();
-                                setSheetState(() => tempMinRating = r);
-                              },
-                              child: Container(
-                                margin: const EdgeInsets.only(right: 6),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: selected
-                                      ? const Color(0xFFFF9F1C)
-                                          .withValues(alpha: 0.18)
-                                      : const Color(0xFF191D26),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                    color: selected
-                                        ? const Color(0xFFFF9F1C)
-                                        : Colors.white.withValues(alpha: 0.08),
+            return Center(
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  width: MediaQuery.sizeOf(ctx).width * 0.9,
+                  constraints: BoxConstraints(
+                    maxWidth: 420,
+                    maxHeight: MediaQuery.sizeOf(ctx).height * 0.84,
+                  ),
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0E1118),
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(color: const Color(0xFF232838)),
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF5C451)
+                                    .withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.auto_awesome_rounded,
+                                    color: Color(0xFFF5C451),
+                                    size: 13,
                                   ),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    r == 0.0 ? 'Any' : '${r.toInt()}.0+ ★',
+                                  SizedBox(width: 5),
+                                  Text(
+                                    'SURPRISE PICK',
                                     style: TextStyle(
-                                      color: selected
-                                          ? const Color(0xFFFF9F1C)
-                                          : Colors.white70,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFFF5C451),
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.5,
                                     ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Spacer(),
+                            if (tempLang != null ||
+                                tempGenres.isNotEmpty ||
+                                tempMinRating != 0.0 ||
+                                activeMood != null)
+                              TextButton(
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                onPressed: () {
+                                  setSheetState(() {
+                                    activeMood = null;
+                                    tempLang = null;
+                                    tempGenres.clear();
+                                    tempMinRating = 0.0;
+                                  });
+                                },
+                                child: const Text(
+                                  'Reset',
+                                  style: TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ),
+                            const SizedBox(width: 4),
+                            IconButton(
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              icon: const Icon(
+                                Icons.close_rounded,
+                                color: Colors.white54,
+                                size: 20,
+                              ),
+                              onPressed: () => Navigator.pop(ctx),
                             ),
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 14),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        const Text(
+                          'Pick Your Mood',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 19,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        const Text(
+                          'Tap a quick mood, customize filters, or skip straight to a pick.',
+                          style: TextStyle(color: Colors.white54, fontSize: 12),
+                        ),
+                        const SizedBox(height: 14),
+                        SizedBox(
+                          height: 34,
+                          child: ListView(
+                            scrollDirection: Axis.horizontal,
+                            children: [
+                              for (final preset in const [
+                                ('Top Rated', 8.0, <int>[]),
+                                ('Action', 6.0, [28]),
+                                ('Comedy', 6.0, [35]),
+                                ('Thriller', 6.0, [53]),
+                                ('Horror', 6.0, [27]),
+                              ])
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(18),
+                                    onTap: () {
+                                      HapticFeedback.selectionClick();
+                                      setSheetState(() {
+                                        activeMood = preset.$1;
+                                        tempMinRating = preset.$2;
+                                        tempGenres
+                                          ..clear()
+                                          ..addAll(preset.$3);
+                                      });
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: activeMood == preset.$1
+                                            ? const Color(0xFFF5C451)
+                                            : const Color(0xFF161A24),
+                                        borderRadius: BorderRadius.circular(18),
+                                        border: Border.all(
+                                          color: activeMood == preset.$1
+                                              ? const Color(0xFFF5C451)
+                                              : const Color(0xFF232838),
+                                        ),
+                                      ),
+                                      child: Text(
+                                        preset.$1,
+                                        style: TextStyle(
+                                          color: activeMood == preset.$1
+                                              ? Colors.black
+                                              : Colors.white70,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
                       const Text(
                         'Language',
                         style: TextStyle(
@@ -1737,14 +1901,14 @@ class _HomePageState extends ConsumerState<HomePage> {
                                 ),
                                 decoration: BoxDecoration(
                                   color: selected
-                                      ? const Color(0xFF00E5A0)
+                                      ? const Color(0xFFF5C451)
                                           .withValues(alpha: 0.16)
-                                      : const Color(0xFF191D26),
+                                      : const Color(0xFF161A24),
                                   borderRadius: BorderRadius.circular(14),
                                   border: Border.all(
                                     color: selected
-                                        ? const Color(0xFF00E5A0)
-                                        : Colors.white.withValues(alpha: 0.08),
+                                        ? const Color(0xFFF5C451)
+                                        : const Color(0xFF232838),
                                   ),
                                 ),
                                 child: Row(
@@ -1756,7 +1920,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                                       lang['name'] as String,
                                       style: TextStyle(
                                         color: selected
-                                            ? const Color(0xFF00E5A0)
+                                            ? const Color(0xFFF5C451)
                                             : Colors.white70,
                                         fontSize: 12,
                                         fontWeight: FontWeight.w600,
@@ -1769,102 +1933,77 @@ class _HomePageState extends ConsumerState<HomePage> {
                           },
                         ),
                       ),
-                      const SizedBox(height: 14),
-                      const Text(
-                        'Genres (Optional)',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 7,
-                        runSpacing: 7,
-                        children: _genres.take(10).map((g) {
-                          final gid = g['id'] as int;
-                          final selected = tempGenres.contains(gid);
-                          return InkWell(
-                            borderRadius: BorderRadius.circular(12),
-                            onTap: () {
-                              HapticFeedback.selectionClick();
-                              setSheetState(() {
-                                if (selected) {
-                                  tempGenres.remove(gid);
-                                } else {
-                                  tempGenres.add(gid);
-                                }
-                              });
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: selected
-                                    ? const Color(0xFFFF9F1C)
-                                        .withValues(alpha: 0.16)
-                                    : const Color(0xFF191D26),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: selected
-                                      ? const Color(0xFFFF9F1C)
-                                      : Colors.white.withValues(alpha: 0.08),
-                                ),
-                              ),
-                              child: Text(
-                                g['name'] as String,
-                                style: TextStyle(
-                                  color: selected
-                                      ? const Color(0xFFFF9F1C)
-                                      : Colors.white70,
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
                       const SizedBox(height: 20),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: isSpinning ? null : launchRoulette,
-                          icon: isSpinning
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.black,
-                                  ),
-                                )
-                              : const Icon(Icons.casino_rounded, size: 19),
-                          label: Text(
-                            isSpinning
-                                ? 'Finding Matching Movies...'
-                                : 'Spin Roulette',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 14.5,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: isSpinning
+                                  ? null
+                                  : () => launchRoulette(skipFilters: true),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                shadowColor: Colors.transparent,
+                                side: const BorderSide(
+                                  color: Color(0xFF262C3D),
+                                ),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 13),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(13),
+                                ),
+                              ),
+                              child: const Text(
+                                'Skip & Pick',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13.5,
+                                ),
+                              ),
                             ),
                           ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFFF9F1C),
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(vertical: 13),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 2,
+                            child: ElevatedButton.icon(
+                              onPressed: isSpinning ? null : launchRoulette,
+                              icon: isSpinning
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.black,
+                                      ),
+                                    )
+                                  : const Icon(Icons.casino_rounded, size: 18),
+                              label: Text(
+                                isSpinning ? 'Picking...' : 'Pick Movie',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFFF5C451),
+                                foregroundColor: Colors.black,
+                                elevation: 0,
+                                shadowColor: Colors.transparent,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 13),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(13),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
+                        ],
                       ),
                     ],
                   ),
                 ),
+              ),
               ),
             );
           },

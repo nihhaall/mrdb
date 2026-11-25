@@ -1,7 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:mrdb/constens/keys.dart';
 import 'package:mrdb/services/network_service.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class TelegramVideoItem {
@@ -16,6 +19,7 @@ class TelegramVideoItem {
   final DateTime? createdAt;
   final String streamUrl;
   final String? watchUrl;
+  final String? thumbUrl;
 
   const TelegramVideoItem({
     this.msgId,
@@ -29,6 +33,7 @@ class TelegramVideoItem {
     this.createdAt,
     required this.streamUrl,
     this.watchUrl,
+    this.thumbUrl,
   });
 
   bool get isMkv =>
@@ -73,6 +78,20 @@ class TelegramVideoItem {
         ? rawTmdb
         : int.tryParse((rawTmdb ?? '').toString());
 
+    final rawThumb = (json['thumb_url'] ?? '').toString().trim();
+    String? resolvedThumb = rawThumb.isNotEmpty ? rawThumb : null;
+    if (resolvedThumb == null && msgId != null) {
+      if (fallbackBaseUrl != null && fallbackBaseUrl.trim().isNotEmpty) {
+        resolvedThumb =
+            '${TelegramStreamService.normalizeBaseUrl(fallbackBaseUrl)}/api/thumb/$msgId';
+      } else if (resolvedStream.isNotEmpty) {
+        try {
+          final uri = Uri.parse(resolvedStream);
+          resolvedThumb = '${uri.origin}/api/thumb/$msgId';
+        } catch (_) {}
+      }
+    }
+
     return TelegramVideoItem(
       msgId: msgId,
       hash: hash,
@@ -87,6 +106,7 @@ class TelegramVideoItem {
       createdAt: DateTime.tryParse((json['created_at'] ?? '').toString()),
       streamUrl: resolvedStream,
       watchUrl: json['watch_url']?.toString(),
+      thumbUrl: resolvedThumb,
     );
   }
 
@@ -102,6 +122,7 @@ class TelegramVideoItem {
         'created_at': createdAt?.toIso8601String(),
         'stream_url': streamUrl,
         'watch_url': watchUrl,
+        'thumb_url': thumbUrl,
       };
 }
 
@@ -109,14 +130,51 @@ class TelegramVideosResult {
   final List<TelegramVideoItem> videos;
   final String baseUrl;
   final bool serverFeedSupported;
+  final bool hasMore;
+  final int rawCount;
   final String? errorMessage;
 
   const TelegramVideosResult({
     required this.videos,
     required this.baseUrl,
     this.serverFeedSupported = true,
+    this.hasMore = false,
+    this.rawCount = 0,
     this.errorMessage,
   });
+}
+
+class VideoWatchProgress {
+  final int positionMs;
+  final int durationMs;
+  final int updatedAtMs;
+
+  const VideoWatchProgress({
+    required this.positionMs,
+    required this.durationMs,
+    this.updatedAtMs = 0,
+  });
+
+  double get fraction => durationMs > 0
+      ? (positionMs / durationMs).clamp(0.0, 1.0)
+      : 0.0;
+
+  bool get canResume =>
+      positionMs >= 5000 &&
+      (durationMs <= 0 || positionMs < durationMs - 10000);
+
+  Map<String, dynamic> toJson() => {
+    'position_ms': positionMs,
+    'duration_ms': durationMs,
+    'updated_at_ms': updatedAtMs,
+  };
+
+  factory VideoWatchProgress.fromJson(Map<String, dynamic> json) =>
+      VideoWatchProgress(
+        positionMs: (json['position_ms'] as num?)?.toInt() ?? 0,
+        durationMs: (json['duration_ms'] as num?)?.toInt() ?? 0,
+        updatedAtMs: (json['updated_at_ms'] as num?)?.toInt() ?? 0,
+      );
 }
 
 class TelegramCodeLookupResult {
@@ -133,6 +191,124 @@ class TelegramStreamService {
   static const String localTestBotUrl = 'http://127.0.0.1:8080';
   static const String _prefBaseUrlKey = 'telegram_stream_bot_url';
   static const String _prefSavedUrlsKey = 'telegram_saved_stream_items';
+  static const String _prefWatchProgressKey = 'telegram_watch_progress_v1';
+
+  static String progressKeyFor(TelegramVideoItem item) {
+    final code = item.streamCode.trim().toUpperCase();
+    if (code.isNotEmpty) return code;
+    return item.streamUrl.trim();
+  }
+
+  Future<Map<String, VideoWatchProgress>> getAllWatchProgress() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefWatchProgressKey);
+      if (raw == null || raw.isEmpty) return {};
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return {};
+      final map = <String, VideoWatchProgress>{};
+      for (final entry in decoded.entries) {
+        if (entry.value is Map) {
+          map[entry.key.toString()] = VideoWatchProgress.fromJson(
+            Map<String, dynamic>.from(entry.value as Map),
+          );
+        }
+      }
+      return map;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> saveWatchProgress(
+    String key,
+    Duration position,
+    Duration duration,
+  ) async {
+    final trimmed = key.trim();
+    if (trimmed.isEmpty) return;
+    final posMs = position.inMilliseconds;
+    final durMs = duration.inMilliseconds;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final all = await getAllWatchProgress();
+      if (durMs > 0 && posMs >= durMs - 10000) {
+        all.remove(trimmed);
+      } else if (posMs >= 3000) {
+        all[trimmed] = VideoWatchProgress(
+          positionMs: posMs,
+          durationMs: durMs,
+          updatedAtMs: DateTime.now().millisecondsSinceEpoch,
+        );
+      }
+      await prefs.setString(
+        _prefWatchProgressKey,
+        jsonEncode(all.map((k, v) => MapEntry(k, v.toJson()))),
+      );
+    } catch (_) {}
+  }
+
+  static const String _prefCapturedFramesKey =
+      'telegram_stream_captured_frames';
+
+  Future<String?> saveCapturedFrame(String key, Uint8List bytes) async {
+    final trimmed = key.trim();
+    if (trimmed.isEmpty || bytes.isEmpty) return null;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final framesDir = Directory('${dir.path}/stream_frames');
+      if (!await framesDir.exists()) {
+        await framesDir.create(recursive: true);
+      }
+      final safeKey = trimmed.hashCode.abs().toString();
+      final file = File('${framesDir.path}/frame_$safeKey.jpg');
+      await file.writeAsBytes(bytes, flush: true);
+
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefCapturedFramesKey);
+      final map = raw != null
+          ? Map<String, String>.from(jsonDecode(raw) as Map)
+          : <String, String>{};
+      map[trimmed] = file.path;
+      await prefs.setString(_prefCapturedFramesKey, jsonEncode(map));
+      return file.path;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, String>> getAllCapturedFrames() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefCapturedFramesKey);
+      if (raw == null || raw.isEmpty) return const {};
+      final decoded = jsonDecode(raw) as Map;
+      final result = <String, String>{};
+      for (final entry in decoded.entries) {
+        final path = entry.value.toString();
+        if (File(path).existsSync()) {
+          result[entry.key.toString()] = path;
+        }
+      }
+      return result;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<void> clearWatchProgress(String key) async {
+    final trimmed = key.trim();
+    if (trimmed.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final all = await getAllWatchProgress();
+      all.remove(trimmed);
+      await prefs.setString(
+        _prefWatchProgressKey,
+        jsonEncode(all.map((k, v) => MapEntry(k, v.toJson()))),
+      );
+    } catch (_) {}
+  }
 
   static String normalizeBaseUrl(String raw) {
     var trimmed = raw.trim();
@@ -337,7 +513,8 @@ class TelegramStreamService {
   Future<TelegramVideosResult> fetchBotVideos({
     String? query,
     int? tmdbId,
-    int limit = 50,
+    int limit = 20,
+    int offset = 0,
   }) async {
     final candidates = await _candidateBaseUrls();
     final hasNet = await NetworkService.instance.hasInternet();
@@ -350,6 +527,7 @@ class TelegramStreamService {
         query: query,
         tmdbId: tmdbId,
         limit: limit,
+        offset: offset,
       );
       if (res.serverFeedSupported && res.errorMessage == null) {
         return res;
@@ -396,9 +574,13 @@ class TelegramStreamService {
     String baseUrl, {
     String? query,
     int? tmdbId,
-    int limit = 50,
+    int limit = 20,
+    int offset = 0,
   }) async {
-    final queryParams = <String, String>{'limit': '$limit'};
+    final queryParams = <String, String>{
+      'limit': '$limit',
+      if (offset > 0) 'offset': '$offset',
+    };
     if (query != null && query.trim().isNotEmpty) {
       queryParams['q'] = query.trim();
     }
@@ -426,10 +608,15 @@ class TelegramStreamService {
               )
               .where((v) => v.streamUrl.isNotEmpty)
               .toList();
+          final rawCount = parsed.length;
+          final hasMore =
+              (decoded['has_more'] as bool?) ?? (rawCount >= limit);
           return TelegramVideosResult(
             videos: dedupeVideos(parsed),
             baseUrl: baseUrl,
             serverFeedSupported: true,
+            hasMore: hasMore,
+            rawCount: rawCount,
           );
         }
         return TelegramVideosResult(
@@ -466,6 +653,37 @@ class TelegramStreamService {
     }
   }
 
+  Future<bool> deleteBotVideo(TelegramVideoItem item) async {
+    final identifier = item.msgId != null
+        ? '${item.msgId}'
+        : item.streamCode.trim();
+    if (identifier.isEmpty) return false;
+
+    var deleted = false;
+    final candidates = await _candidateBaseUrls();
+    for (final baseUrl in candidates) {
+      try {
+        final uri = Uri.parse(
+          '$baseUrl/api/videos/${Uri.encodeComponent(identifier)}',
+        );
+        final res = await NetworkService.instance.client
+            .delete(uri)
+            .timeout(const Duration(seconds: 6));
+        if (res.statusCode == 200) {
+          final decoded = jsonDecode(res.body);
+          if (decoded is Map && decoded['ok'] == true) {
+            deleted = true;
+            break;
+          }
+        }
+      } catch (_) {}
+    }
+
+    await removeManualVideo(item.streamUrl);
+    await clearWatchProgress(progressKeyFor(item));
+    return deleted;
+  }
+
   /// Searches TMDB movies DB so users can browse movies alongside bot files.
   Future<List<Map<String, dynamic>>> searchTmdbMovies(String query) async {
     final trimmed = query.trim();
@@ -491,4 +709,257 @@ class TelegramStreamService {
     } catch (_) {}
     return const [];
   }
+
+  static const String _ownerAdminKey = 'mrdb-owner-admin';
+
+  Map<String, String> get _ownerHeaders => const {
+    'X-Owner-Key': _ownerAdminKey,
+    'Content-Type': 'application/json',
+  };
+
+  Future<BotAdminStats?> fetchBotAdminStats() async {
+    for (final baseUrl in await _candidateBaseUrls()) {
+      try {
+        final res = await NetworkService.instance.client
+            .get(Uri.parse('$baseUrl/api/admin/stats'), headers: _ownerHeaders)
+            .timeout(const Duration(seconds: 6));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          if (data is Map && data['ok'] == true) {
+            return BotAdminStats.fromJson(Map<String, dynamic>.from(data));
+          }
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  Future<BotUsersResult> fetchBotUsers({
+    String? query,
+    int limit = 30,
+    int offset = 0,
+  }) async {
+    for (final baseUrl in await _candidateBaseUrls()) {
+      try {
+        final qp = <String, String>{
+          'limit': '$limit',
+          'offset': '$offset',
+          if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+        };
+        final uri = Uri.parse('$baseUrl/api/admin/users').replace(queryParameters: qp);
+        final res = await NetworkService.instance.client
+            .get(uri, headers: _ownerHeaders)
+            .timeout(const Duration(seconds: 7));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          if (data is Map && data['ok'] == true) {
+            final users = (data['users'] as List? ?? [])
+                .whereType<Map>()
+                .map((e) => BotUserItem.fromJson(Map<String, dynamic>.from(e)))
+                .toList();
+            return BotUsersResult(
+              users: users,
+              totalUsers: (data['total_users'] as num?)?.toInt() ?? users.length,
+              hasMore: data['has_more'] == true,
+            );
+          }
+        }
+      } catch (_) {}
+    }
+    return const BotUsersResult(
+      users: [],
+      totalUsers: 0,
+      hasMore: false,
+      errorMessage: 'Could not reach bot admin API.',
+    );
+  }
+
+  Future<bool> setBotUserBanned(int userId, {required bool ban}) async {
+    for (final baseUrl in await _candidateBaseUrls()) {
+      try {
+        final uri = Uri.parse('$baseUrl/api/admin/users/$userId/ban');
+        final res = ban
+            ? await NetworkService.instance.client
+                .post(uri, headers: _ownerHeaders)
+                .timeout(const Duration(seconds: 6))
+            : await NetworkService.instance.client
+                .delete(uri, headers: _ownerHeaders)
+                .timeout(const Duration(seconds: 6));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          if (data is Map && data['ok'] == true) return true;
+        }
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  Future<BotBroadcastResult> sendBotBroadcast(String message) async {
+    final trimmed = message.trim();
+    if (trimmed.isEmpty) {
+      return const BotBroadcastResult(ok: false, error: 'Message cannot be empty');
+    }
+    for (final baseUrl in await _candidateBaseUrls()) {
+      try {
+        final res = await NetworkService.instance.client
+            .post(
+              Uri.parse('$baseUrl/api/admin/broadcast'),
+              headers: _ownerHeaders,
+              body: jsonEncode({'message': trimmed}),
+            )
+            .timeout(const Duration(seconds: 8));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          if (data is Map && data['ok'] == true) {
+            return BotBroadcastResult(
+              ok: true,
+              total: (data['total'] as num?)?.toInt() ?? 0,
+              sent: (data['sent'] as num?)?.toInt() ?? 0,
+              failed: (data['failed'] as num?)?.toInt() ?? 0,
+              done: data['done'] ?? true,
+              jobId: data['job_id']?.toString(),
+              baseUrl: baseUrl,
+            );
+          }
+        }
+      } catch (_) {}
+    }
+    return const BotBroadcastResult(ok: false, error: 'Broadcast request failed');
+  }
+
+  Future<BotBroadcastResult?> fetchBroadcastStatus(
+    String baseUrl,
+    String jobId,
+  ) async {
+    try {
+      final res = await NetworkService.instance.client
+          .get(
+            Uri.parse('$baseUrl/api/admin/broadcast/${Uri.encodeComponent(jobId)}'),
+            headers: _ownerHeaders,
+          )
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data is Map && data['ok'] == true) {
+          return BotBroadcastResult(
+            ok: true,
+            total: (data['total'] as num?)?.toInt() ?? 0,
+            sent: (data['sent'] as num?)?.toInt() ?? 0,
+            failed: (data['failed'] as num?)?.toInt() ?? 0,
+            done: data['done'] == true,
+            jobId: jobId,
+            baseUrl: baseUrl,
+          );
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+}
+
+class BotAdminStats {
+  final int totalUsers;
+  final int bannedUsers;
+  final int totalVideos;
+  final String uptime;
+  final String telegramBot;
+  final int connectedBots;
+  final Map<String, int> loads;
+
+  const BotAdminStats({
+    required this.totalUsers,
+    required this.bannedUsers,
+    required this.totalVideos,
+    required this.uptime,
+    required this.telegramBot,
+    required this.connectedBots,
+    this.loads = const {},
+  });
+
+  factory BotAdminStats.fromJson(Map<String, dynamic> json) {
+    final rawLoads = json['loads'];
+    final parsedLoads = <String, int>{};
+    if (rawLoads is Map) {
+      for (final e in rawLoads.entries) {
+        parsedLoads[e.key.toString()] = (e.value as num?)?.toInt() ?? 0;
+      }
+    }
+    return BotAdminStats(
+      totalUsers: (json['total_users'] as num?)?.toInt() ?? 0,
+      bannedUsers: (json['banned_users'] as num?)?.toInt() ?? 0,
+      totalVideos: (json['total_videos'] as num?)?.toInt() ?? 0,
+      uptime: (json['uptime'] ?? '-').toString(),
+      telegramBot: (json['telegram_bot'] ?? '').toString(),
+      connectedBots: (json['connected_bots'] as num?)?.toInt() ?? 0,
+      loads: parsedLoads,
+    );
+  }
+}
+
+class BotUserItem {
+  final int id;
+  final String name;
+  final String username;
+  final String joinDate;
+  final bool isBanned;
+
+  const BotUserItem({
+    required this.id,
+    this.name = '',
+    this.username = '',
+    required this.joinDate,
+    required this.isBanned,
+  });
+
+  BotUserItem copyWith({bool? isBanned}) => BotUserItem(
+    id: id,
+    name: name,
+    username: username,
+    joinDate: joinDate,
+    isBanned: isBanned ?? this.isBanned,
+  );
+
+  factory BotUserItem.fromJson(Map<String, dynamic> json) => BotUserItem(
+    id: (json['id'] as num?)?.toInt() ?? 0,
+    name: (json['name'] ?? '').toString(),
+    username: (json['username'] ?? '').toString(),
+    joinDate: (json['join_date'] ?? '').toString(),
+    isBanned: json['is_banned'] == true,
+  );
+}
+
+class BotUsersResult {
+  final List<BotUserItem> users;
+  final int totalUsers;
+  final bool hasMore;
+  final String? errorMessage;
+
+  const BotUsersResult({
+    required this.users,
+    required this.totalUsers,
+    required this.hasMore,
+    this.errorMessage,
+  });
+}
+
+class BotBroadcastResult {
+  final bool ok;
+  final int total;
+  final int sent;
+  final int failed;
+  final bool done;
+  final String? jobId;
+  final String? baseUrl;
+  final String? error;
+
+  const BotBroadcastResult({
+    required this.ok,
+    this.total = 0,
+    this.sent = 0,
+    this.failed = 0,
+    this.done = true,
+    this.jobId,
+    this.baseUrl,
+    this.error,
+  });
 }

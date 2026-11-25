@@ -913,23 +913,26 @@ class _MoviePreviewState extends State<MoviePreview>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: hasPoster
-                                ? CachedNetworkImage(
-                                    imageUrl: '${AppConstants.baseImageUrl}$poster',
-                                    fit: BoxFit.cover,
-                                    width: 105,
-                                    height: double.infinity,
-                                    placeholder: (context, url) => Container(
+                          child: Hero(
+                            tag: 'collection_movie_${movie['id']}',
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: hasPoster
+                                  ? CachedNetworkImage(
+                                      imageUrl: '${AppConstants.baseImageUrl}$poster',
+                                      fit: BoxFit.cover,
                                       width: 105,
                                       height: double.infinity,
-                                      color: const Color(0xFF1E2230),
-                                    ),
-                                    errorWidget: (context, url, error) =>
-                                        buildPosterFallback(),
-                                  )
-                                : buildPosterFallback(),
+                                      placeholder: (context, url) => Container(
+                                        width: 105,
+                                        height: double.infinity,
+                                        color: const Color(0xFF1E2230),
+                                      ),
+                                      errorWidget: (context, url, error) =>
+                                          buildPosterFallback(),
+                                    )
+                                  : buildPosterFallback(),
+                            ),
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -3414,6 +3417,8 @@ class _MoviePreviewState extends State<MoviePreview>
                                                             profilePath,
                                                         initialCharacter:
                                                             character,
+                                                        heroTag:
+                                                            'cast_actor_${widget.movieId}_${actor['id']}_$index',
                                                       ),
                                                 ),
                                               );
@@ -3425,25 +3430,28 @@ class _MoviePreviewState extends State<MoviePreview>
                                               crossAxisAlignment:
                                                   CrossAxisAlignment.start,
                                               children: [
-                                                Container(
-                                                  width: 95,
-                                                  height: 115,
-                                                  decoration: BoxDecoration(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          14,
-                                                        ),
-                                                    border: Border.all(
-                                                      color: Colors.white
-                                                          .withValues(
-                                                            alpha: 0.08,
+                                                Hero(
+                                                  tag:
+                                                      'cast_actor_${widget.movieId}_${actor['id']}_$index',
+                                                  child: Container(
+                                                    width: 95,
+                                                    height: 115,
+                                                    decoration: BoxDecoration(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            14,
                                                           ),
+                                                      border: Border.all(
+                                                        color: Colors.white
+                                                            .withValues(
+                                                              alpha: 0.08,
+                                                            ),
+                                                      ),
+                                                      color: const Color(
+                                                        0xFF161622,
+                                                      ),
                                                     ),
-                                                    color: const Color(
-                                                      0xFF161622,
-                                                    ),
-                                                  ),
-                                                  child: ClipRRect(
+                                                    child: ClipRRect(
                                                     borderRadius:
                                                         BorderRadius.circular(
                                                           13,
@@ -3486,6 +3494,7 @@ class _MoviePreviewState extends State<MoviePreview>
                                                             ),
                                                           ),
                                                   ),
+                                                ),
                                                 ),
                                                 const SizedBox(height: 6),
                                                 Text(
@@ -3909,6 +3918,8 @@ class _MoviePreviewState extends State<MoviePreview>
                           initialName: name,
                           initialProfilePath: profilePath,
                           initialCharacter: roles,
+                          heroTag:
+                              'crew_actor_${widget.movieId}_${member['id']}_$index',
                         ),
                       ),
                     );
@@ -3930,7 +3941,10 @@ class _MoviePreviewState extends State<MoviePreview>
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        ClipRRect(
+                        Hero(
+                          tag:
+                              'crew_actor_${widget.movieId}_${member['id']}_$index',
+                          child: ClipRRect(
                           borderRadius: BorderRadius.circular(10),
                           child: SizedBox(
                             width: 44,
@@ -3958,6 +3972,7 @@ class _MoviePreviewState extends State<MoviePreview>
                                     ),
                                   ),
                           ),
+                        ),
                         ),
                         const SizedBox(width: 10),
                         ConstrainedBox(
@@ -4040,54 +4055,58 @@ class _MoviePreviewState extends State<MoviePreview>
                           initialIndex: index,
                           title: (movi['title'] ?? widget.title ?? 'Gallery')
                               .toString(),
+                          heroTagPrefix: 'movie_gallery_${widget.movieId}',
                         ),
                       ),
                     );
                   },
-                  child: Container(
-                    width: 196,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.1),
+                  child: Hero(
+                    tag: 'movie_gallery_${widget.movieId}_$index',
+                    child: Container(
+                      width: 196,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.1),
+                        ),
+                        color: const Color(0xFF14141E),
                       ),
-                      color: const Color(0xFF14141E),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(13),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          CachedNetworkImage(
-                            imageUrl: 'https://image.tmdb.org/t/p/w780$path',
-                            fit: BoxFit.cover,
-                            placeholder: (_, _) => Container(
-                              color: const Color(0xFF161824),
-                            ),
-                            errorWidget: (_, _, _) => const Center(
-                              child: Icon(
-                                Icons.broken_image_rounded,
-                                color: Colors.white24,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(13),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            CachedNetworkImage(
+                              imageUrl: 'https://image.tmdb.org/t/p/w780$path',
+                              fit: BoxFit.cover,
+                              placeholder: (_, _) => Container(
+                                color: const Color(0xFF161824),
+                              ),
+                              errorWidget: (_, _, _) => const Center(
+                                child: Icon(
+                                  Icons.broken_image_rounded,
+                                  color: Colors.white24,
+                                ),
                               ),
                             ),
-                          ),
-                          Positioned(
-                            right: 8,
-                            bottom: 8,
-                            child: Container(
-                              padding: const EdgeInsets.all(5),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.65),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.fullscreen_rounded,
-                                color: Colors.white,
-                                size: 14,
+                            Positioned(
+                              right: 8,
+                              bottom: 8,
+                              child: Container(
+                                padding: const EdgeInsets.all(5),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.65),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.fullscreen_rounded,
+                                  color: Colors.white,
+                                  size: 14,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -5879,6 +5898,8 @@ class AllCastPage extends StatelessWidget {
                             initialName: actorName,
                             initialProfilePath: profilePath,
                             initialCharacter: character,
+                            heroTag:
+                                'all_cast_actor_${actor['id']}_$index',
                           ),
                         ),
                       );
@@ -5888,7 +5909,10 @@ class AllCastPage extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
-                        child: Container(
+                        child: Hero(
+                          tag:
+                              'all_cast_actor_${actor['id']}_$index',
+                          child: Container(
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(
@@ -5926,6 +5950,7 @@ class AllCastPage extends StatelessWidget {
                                   ),
                           ),
                         ),
+                      ),
                       ),
                       const SizedBox(height: 6),
                       Text(

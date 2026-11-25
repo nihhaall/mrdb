@@ -6,12 +6,14 @@ class ImageGalleryPage extends StatefulWidget {
   final List<String> imagePaths;
   final int initialIndex;
   final String title;
+  final String? heroTagPrefix;
 
   const ImageGalleryPage({
     super.key,
     required this.imagePaths,
     this.initialIndex = 0,
     this.title = 'Gallery',
+    this.heroTagPrefix,
   });
 
   @override
@@ -89,25 +91,31 @@ class _ImageGalleryPageState extends State<ImageGalleryPage> {
           final hdUrl = path.startsWith('http')
               ? path
               : 'https://image.tmdb.org/t/p/original$path';
+          final imageWidget = CachedNetworkImage(
+            imageUrl: hdUrl,
+            fit: BoxFit.contain,
+            placeholder: (_, _) => const Center(
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Color(0xFF00E5A0),
+              ),
+            ),
+            errorWidget: (_, _, _) => const Icon(
+              Icons.broken_image_rounded,
+              color: Colors.white38,
+              size: 48,
+            ),
+          );
           return InteractiveViewer(
             minScale: 1.0,
             maxScale: 4.0,
             child: Center(
-              child: CachedNetworkImage(
-                imageUrl: hdUrl,
-                fit: BoxFit.contain,
-                placeholder: (_, _) => const Center(
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Color(0xFF00E5A0),
-                  ),
-                ),
-                errorWidget: (_, _, _) => const Icon(
-                  Icons.broken_image_rounded,
-                  color: Colors.white38,
-                  size: 48,
-                ),
-              ),
+              child: widget.heroTagPrefix != null
+                  ? Hero(
+                      tag: '${widget.heroTagPrefix}_$index',
+                      child: imageWidget,
+                    )
+                  : imageWidget,
             ),
           );
         },

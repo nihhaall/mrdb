@@ -463,7 +463,9 @@ class _ClientOverviewPageState extends State<ClientOverviewPage> {
                     children: [
                       // Poster
                       Expanded(
-                        child: Stack(
+                        child: Hero(
+                          tag: 'client_fav_${widget.clientId}_$movieId',
+                          child: Stack(
                           fit: StackFit.expand,
                           children: [
                             if (poster.isNotEmpty)
@@ -516,6 +518,7 @@ class _ClientOverviewPageState extends State<ClientOverviewPage> {
                                 ),
                               ),
                           ],
+                        ),
                         ),
                       ),
                       // Title

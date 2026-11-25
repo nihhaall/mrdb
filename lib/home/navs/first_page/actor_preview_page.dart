@@ -16,6 +16,7 @@ class ActorPreviewPage extends StatefulWidget {
   final String? initialName;
   final String? initialProfilePath;
   final String? initialCharacter;
+  final String? heroTag;
 
   const ActorPreviewPage({
     super.key,
@@ -23,6 +24,7 @@ class ActorPreviewPage extends StatefulWidget {
     this.initialName,
     this.initialProfilePath,
     this.initialCharacter,
+    this.heroTag,
   });
 
   @override
@@ -433,26 +435,28 @@ class _ActorPreviewPageState extends State<ActorPreviewPage> {
               background: Stack(
                 fit: StackFit.expand,
                 children: [
-                  if (profilePath != null && profilePath.isNotEmpty)
-                    CachedNetworkImage(
-                      imageUrl: '${AppConstants.baseImageUrl}$profilePath',
-                      fit: BoxFit.cover,
-                      alignment: const Alignment(0, -0.4),
-                      errorWidget: (context, url, error) => Container(
-                        color: const Color(0xFF14141E),
-                      ),
-                    )
-                  else
-                    Container(
-                      color: const Color(0xFF14141E),
-                      child: const Center(
-                        child: Icon(
-                          Icons.person,
-                          size: 90,
-                          color: Colors.white24,
-                        ),
-                      ),
-                    ),
+                  Hero(
+                    tag: widget.heroTag ?? 'actor_${widget.personId}',
+                    child: (profilePath != null && profilePath.isNotEmpty)
+                        ? CachedNetworkImage(
+                            imageUrl: '${AppConstants.baseImageUrl}$profilePath',
+                            fit: BoxFit.cover,
+                            alignment: const Alignment(0, -0.4),
+                            errorWidget: (context, url, error) => Container(
+                              color: const Color(0xFF14141E),
+                            ),
+                          )
+                        : Container(
+                            color: const Color(0xFF14141E),
+                            child: const Center(
+                              child: Icon(
+                                Icons.person,
+                                size: 90,
+                                color: Colors.white24,
+                              ),
+                            ),
+                          ),
+                  ),
 
                   // Dark cinematic gradient scrims
                   DecoratedBox(
@@ -783,8 +787,10 @@ class _ActorPreviewPageState extends State<ActorPreviewPage> {
                               posterPath: posterPath,
                               title: title,
                               backdropPath: movie['backdrop_path'],
-                              heroTag: 'actor_movie_hero_${movie['id']}',
-                              titleHeroTag: 'actor_movie_title_${movie['id']}',
+                              heroTag:
+                                  'actor_movie_hero_${widget.personId}_${movie['id']}_$index',
+                              titleHeroTag:
+                                  'actor_movie_title_${widget.personId}_${movie['id']}_$index',
                             ),
                           ),
                         );
@@ -795,42 +801,46 @@ class _ActorPreviewPageState extends State<ActorPreviewPage> {
                           Expanded(
                             child: Stack(
                               children: [
-                                Container(
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(13),
-                                    border: Border.all(
-                                      color: Colors.white.withValues(alpha: 0.08),
+                                Hero(
+                                  tag:
+                                      'actor_movie_hero_${widget.personId}_${movie['id']}_$index',
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(13),
+                                      border: Border.all(
+                                        color: Colors.white.withValues(alpha: 0.08),
+                                      ),
+                                      color: const Color(0xFF161622),
                                     ),
-                                    color: const Color(0xFF161622),
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: posterPath != null
-                                        ? CachedNetworkImage(
-                                            imageUrl:
-                                                '${AppConstants.baseImageUrl}$posterPath',
-                                            width: double.infinity,
-                                            height: double.infinity,
-                                            fit: BoxFit.cover,
-                                            placeholder: (context, url) => Container(
-                                              color: const Color(0xFF161622),
-                                            ),
-                                            errorWidget: (context, url, error) =>
-                                                const Center(
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: posterPath != null
+                                          ? CachedNetworkImage(
+                                              imageUrl:
+                                                  '${AppConstants.baseImageUrl}$posterPath',
+                                              width: double.infinity,
+                                              height: double.infinity,
+                                              fit: BoxFit.cover,
+                                              placeholder: (context, url) => Container(
+                                                color: const Color(0xFF161622),
+                                              ),
+                                              errorWidget: (context, url, error) =>
+                                                  const Center(
+                                                child: Icon(
+                                                  Icons.movie_outlined,
+                                                  color: Colors.white24,
+                                                  size: 28,
+                                                ),
+                                              ),
+                                            )
+                                          : const Center(
                                               child: Icon(
                                                 Icons.movie_outlined,
                                                 color: Colors.white24,
                                                 size: 28,
                                               ),
                                             ),
-                                          )
-                                        : const Center(
-                                            child: Icon(
-                                              Icons.movie_outlined,
-                                              color: Colors.white24,
-                                              size: 28,
-                                            ),
-                                          ),
+                                    ),
                                   ),
                                 ),
                                 // Rating Pill Badge
@@ -1047,28 +1057,32 @@ class _ActorPreviewPageState extends State<ActorPreviewPage> {
                           imagePaths: _profileGallery,
                           initialIndex: index,
                           title: personName,
+                          heroTagPrefix: 'actor_gallery_${widget.personId}',
                         ),
                       ),
                     );
                   },
-                  child: Container(
-                    width: 88,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.1),
+                  child: Hero(
+                    tag: 'actor_gallery_${widget.personId}_$index',
+                    child: Container(
+                      width: 88,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.1),
+                        ),
+                        color: const Color(0xFF14141E),
                       ),
-                      color: const Color(0xFF14141E),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(11),
-                      child: CachedNetworkImage(
-                        imageUrl: '${AppConstants.baseImageUrl}$path',
-                        fit: BoxFit.cover,
-                        placeholder: (_, _) =>
-                            Container(color: const Color(0xFF161824)),
-                        errorWidget: (_, _, _) => const Center(
-                          child: Icon(Icons.person, color: Colors.white24),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(11),
+                        child: CachedNetworkImage(
+                          imageUrl: '${AppConstants.baseImageUrl}$path',
+                          fit: BoxFit.cover,
+                          placeholder: (_, _) =>
+                              Container(color: const Color(0xFF161824)),
+                          errorWidget: (_, _, _) => const Center(
+                            child: Icon(Icons.person, color: Colors.white24),
+                          ),
                         ),
                       ),
                     ),

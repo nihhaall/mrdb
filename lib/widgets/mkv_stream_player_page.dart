@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:mrdb/services/telegram_stream_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Fullscreen landscape `.mkv` / `.mp4` streaming player powered by `media_kit`
@@ -13,6 +14,8 @@ class MkvStreamPlayerPage extends StatefulWidget {
   final String streamUrl;
   final String? fallbackWebUrl;
   final String? formatLabel;
+  final String? progressKey;
+  final Duration? initialPosition;
 
   const MkvStreamPlayerPage({
     super.key,
@@ -20,6 +23,8 @@ class MkvStreamPlayerPage extends StatefulWidget {
     required this.streamUrl,
     this.fallbackWebUrl,
     this.formatLabel,
+    this.progressKey,
+    this.initialPosition,
   });
 
   @override
@@ -51,6 +56,8 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
   String? _activeDragType; // 'brightness' or 'volume'
   double _dragStartValue = 0.5;
   double _dragStartY = 0;
+  bool _didInitialSeek = false;
+  DateTime _lastProgressSave = DateTime.fromMillisecondsSinceEpoch(0);
 
   static final RegExp _trailingExtRegex = RegExp(
     r'\.(mkv|mp4|avi|mov|webm|m4v|ts|flv)$',
@@ -142,6 +149,25 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
                 _errorMessage = null;
               }
             });
+            if (!_didInitialSeek &&
+                widget.initialPosition != null &&
+                widget.initialPosition! > Duration.zero) {
+              if (pos < widget.initialPosition! - const Duration(seconds: 2)) {
+                _didInitialSeek = true;
+                p.seek(widget.initialPosition!);
+              } else if (pos >=
+                  widget.initialPosition! - const Duration(seconds: 2)) {
+                _didInitialSeek = true;
+              }
+            }
+            final now = DateTime.now();
+            if (now.difference(_lastProgressSave).inSeconds >= 5) {
+              _lastProgressSave = now;
+              _saveProgressNow();
+              if (pos >= const Duration(minutes: 20)) {
+                _captureFrameNow();
+              }
+            }
           }),
         );
         _subs.add(
@@ -150,7 +176,14 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
           }),
         );
         _subs.add(
-          p.stream.duration.listen((_) {
+          p.stream.duration.listen((dur) {
+            if (!_didInitialSeek &&
+                dur > Duration.zero &&
+                widget.initialPosition != null &&
+                widget.initialPosition! > Duration.zero) {
+              _didInitialSeek = true;
+              p.seek(widget.initialPosition!);
+            }
             if (mounted) setState(() {});
           }),
         );
@@ -161,8 +194,35 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
         );
       }
 
+      if (_player!.platform is NativePlayer) {
+        final native = _player!.platform as NativePlayer;
+        await Future.wait([
+          native.setProperty('cache', 'yes'),
+          native.setProperty('demuxer-max-bytes', '64MiB'),
+          native.setProperty('demuxer-readahead-secs', '30'),
+          native.setProperty('demuxer-lavf-probesize', '500000'),
+          native.setProperty('demuxer-lavf-analyzeduration', '1.0'),
+          native.setProperty('cache-pause', 'yes'),
+          native.setProperty('cache-pause-initial', 'no'),
+          native.setProperty('cache-pause-wait', '1'),
+          native.setProperty(
+            'stream-lavf-o',
+            'reconnect=1,reconnect_streamed=1,reconnect_delay_max=2',
+          ),
+        ]);
+      }
+
+      final hasInitialPos = widget.initialPosition != null &&
+          widget.initialPosition! > Duration.zero;
+
       if (mounted) setState(() {});
-      await _player!.open(Media(widget.streamUrl), play: true);
+      await _player!.open(
+        Media(
+          widget.streamUrl,
+          start: hasInitialPos ? widget.initialPosition : null,
+        ),
+        play: true,
+      );
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -174,8 +234,40 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
     }
   }
 
+  Future<void> _captureFrameNow() async {
+    final p = _player;
+    if (p == null) return;
+    try {
+      final bytes = await p.screenshot(format: 'image/jpeg');
+      if (bytes != null && bytes.isNotEmpty) {
+        final key = (widget.progressKey?.trim().isNotEmpty ?? false)
+            ? widget.progressKey!.trim()
+            : widget.streamUrl.trim();
+        await TelegramStreamService.instance.saveCapturedFrame(key, bytes);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveProgressNow() async {
+    final p = _player;
+    if (p == null) return;
+    final key = (widget.progressKey?.trim().isNotEmpty ?? false)
+        ? widget.progressKey!.trim()
+        : widget.streamUrl.trim();
+    await TelegramStreamService.instance.saveWatchProgress(
+      key,
+      p.state.position,
+      p.state.duration,
+    );
+  }
+
   @override
   void dispose() {
+    final p = _player;
+    if (p != null && p.state.position >= const Duration(minutes: 20)) {
+      _captureFrameNow();
+    }
+    _saveProgressNow();
     _hideTimer?.cancel();
     _indicatorTimer?.cancel();
     _dragHideTimer?.cancel();
@@ -195,6 +287,11 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
   }
 
   Future<void> _exitPlayer() async {
+    final p = _player;
+    if (p != null && p.state.position >= const Duration(minutes: 20)) {
+      await _captureFrameNow();
+    }
+    await _saveProgressNow();
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
@@ -922,11 +1019,11 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
                 ),
               ),
 
-            AnimatedOpacity(
-              opacity: _showControls ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 200),
-              child: IgnorePointer(
-                ignoring: !_showControls,
+            // Visual-only HUD gradient (never blocks gestures)
+            IgnorePointer(
+              child: AnimatedOpacity(
+                opacity: _showControls ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 200),
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -941,195 +1038,228 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
                       ],
                     ),
                   ),
-                  child: SafeArea(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
+                ),
+              ),
+            ),
+
+            // Top Bar (only occupies top strip so left/right gestures always work)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                bottom: false,
+                child: AnimatedOpacity(
+                  opacity: _showControls ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: IgnorePointer(
+                    ignoring: !_showControls,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(
+                              Icons.arrow_back_rounded,
+                              color: Colors.white,
+                            ),
+                            onPressed: _exitPlayer,
                           ),
-                          child: Row(
-                            children: [
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.arrow_back_rounded,
-                                  color: Colors.white,
-                                ),
-                                onPressed: _exitPlayer,
+                          Expanded(
+                            child: Text(
+                              _cleanTitle(widget.title),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
                               ),
-                              Expanded(
-                                child: Text(
-                                  _cleanTitle(widget.title),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: 'Quality',
-                                icon: const Icon(
-                                  Icons.high_quality_rounded,
-                                  color: Colors.white,
-                                  size: 21,
-                                ),
-                                onPressed: _showQualitySheet,
-                              ),
-                              IconButton(
-                                tooltip: 'Audio Track',
-                                icon: const Icon(
-                                  Icons.audiotrack_rounded,
-                                  color: Colors.white,
-                                  size: 21,
-                                ),
-                                onPressed: _showAudioTracksSheet,
-                              ),
-                              IconButton(
-                                tooltip: 'Subtitles',
-                                icon: const Icon(
-                                  Icons.subtitles_rounded,
-                                  color: Colors.white,
-                                  size: 21,
-                                ),
-                                onPressed: _showSubtitleTracksSheet,
-                              ),
-                              IconButton(
-                                tooltip: 'Playback Speed',
-                                icon: const Icon(
-                                  Icons.speed_rounded,
-                                  color: Colors.white,
-                                  size: 21,
-                                ),
-                                onPressed: _showSpeedSheet,
-                              ),
-                              IconButton(
-                                tooltip: 'Aspect Fit',
-                                icon: Icon(
-                                  _videoFit == BoxFit.contain
-                                      ? Icons.fit_screen_rounded
-                                      : Icons.crop_free_rounded,
-                                  color: Colors.white,
-                                  size: 21,
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    _videoFit = _videoFit == BoxFit.contain
-                                        ? BoxFit.cover
-                                        : BoxFit.contain;
-                                  });
-                                },
-                              ),
-                            ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Quality',
+                            icon: const Icon(
+                              Icons.high_quality_rounded,
+                              color: Colors.white,
+                              size: 21,
+                            ),
+                            onPressed: _showQualitySheet,
+                          ),
+                          IconButton(
+                            tooltip: 'Audio Track',
+                            icon: const Icon(
+                              Icons.audiotrack_rounded,
+                              color: Colors.white,
+                              size: 21,
+                            ),
+                            onPressed: _showAudioTracksSheet,
+                          ),
+                          IconButton(
+                            tooltip: 'Subtitles',
+                            icon: const Icon(
+                              Icons.subtitles_rounded,
+                              color: Colors.white,
+                              size: 21,
+                            ),
+                            onPressed: _showSubtitleTracksSheet,
+                          ),
+                          IconButton(
+                            tooltip: 'Playback Speed',
+                            icon: const Icon(
+                              Icons.speed_rounded,
+                              color: Colors.white,
+                              size: 21,
+                            ),
+                            onPressed: _showSpeedSheet,
+                          ),
+                          IconButton(
+                            tooltip: 'Aspect Fit',
+                            icon: Icon(
+                              _videoFit == BoxFit.contain
+                                  ? Icons.fit_screen_rounded
+                                  : Icons.crop_free_rounded,
+                              color: Colors.white,
+                              size: 21,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _videoFit = _videoFit == BoxFit.contain
+                                    ? BoxFit.cover
+                                    : BoxFit.contain;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            // Center Play/Pause/Skip (compact min-size so left/right halves stay interactive)
+            if (_errorMessage == null && !buffering && p != null)
+              Center(
+                child: AnimatedOpacity(
+                  opacity: _showControls ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: IgnorePointer(
+                    ignoring: !_showControls,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          iconSize: 34,
+                          color: Colors.white70,
+                          icon: const Icon(Icons.replay_10_rounded),
+                          onPressed: () => _seekRelative(-10),
+                        ),
+                        const SizedBox(width: 24),
+                        Material(
+                          color: Colors.black54,
+                          shape: const CircleBorder(),
+                          child: IconButton(
+                            iconSize: 48,
+                            color: Colors.white,
+                            icon: Icon(
+                              playing
+                                  ? Icons.pause_rounded
+                                  : Icons.play_arrow_rounded,
+                            ),
+                            onPressed: () {
+                              p.playOrPause();
+                              _scheduleHideControls();
+                            },
                           ),
                         ),
-
-                        if (_errorMessage == null && !buffering && p != null)
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              IconButton(
-                                iconSize: 34,
-                                color: Colors.white70,
-                                icon: const Icon(Icons.replay_10_rounded),
-                                onPressed: () => _seekRelative(-10),
-                              ),
-                              const SizedBox(width: 24),
-                              Material(
-                                color: Colors.black54,
-                                shape: const CircleBorder(),
-                                child: IconButton(
-                                  iconSize: 48,
-                                  color: Colors.white,
-                                  icon: Icon(
-                                    playing
-                                        ? Icons.pause_rounded
-                                        : Icons.play_arrow_rounded,
-                                  ),
-                                  onPressed: () {
-                                    p.playOrPause();
-                                    _scheduleHideControls();
-                                  },
-                                ),
-                              ),
-                              const SizedBox(width: 24),
-                              IconButton(
-                                iconSize: 34,
-                                color: Colors.white70,
-                                icon: const Icon(Icons.forward_10_rounded),
-                                onPressed: () => _seekRelative(10),
-                              ),
-                            ],
-                          )
-                        else
-                          const SizedBox.shrink(),
-
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                          child: Row(
-                            children: [
-                              Text(
-                                _formatDuration(
-                                  Duration(milliseconds: clampedPosMs.round()),
-                                ),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              Expanded(
-                                child: SliderTheme(
-                                  data: SliderTheme.of(context).copyWith(
-                                    trackHeight: 3.5,
-                                    thumbShape: const RoundSliderThumbShape(
-                                      enabledThumbRadius: 6.5,
-                                    ),
-                                    activeTrackColor: _kAccent,
-                                    inactiveTrackColor: Colors.white24,
-                                    thumbColor: _kAccent,
-                                    overlayColor:
-                                        _kAccent.withValues(alpha: 0.2),
-                                  ),
-                                  child: Slider(
-                                    value: clampedPosMs,
-                                    min: 0,
-                                    max: maxMs,
-                                    onChangeStart: (_) {
-                                      _hideTimer?.cancel();
-                                      setState(() => _isSeekingSlider = true);
-                                    },
-                                    onChanged: (v) {
-                                      setState(() => _sliderValueMs = v);
-                                    },
-                                    onChangeEnd: (v) async {
-                                      await p?.seek(
-                                        Duration(milliseconds: v.round()),
-                                      );
-                                      if (mounted) {
-                                        setState(() => _isSeekingSlider = false);
-                                        _scheduleHideControls();
-                                      }
-                                    },
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                _formatDuration(duration),
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
+                        const SizedBox(width: 24),
+                        IconButton(
+                          iconSize: 34,
+                          color: Colors.white70,
+                          icon: const Icon(Icons.forward_10_rounded),
+                          onPressed: () => _seekRelative(10),
                         ),
                       ],
+                    ),
+                  ),
+                ),
+              ),
+
+            // Bottom Timeline Bar
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                top: false,
+                child: AnimatedOpacity(
+                  opacity: _showControls ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: IgnorePointer(
+                    ignoring: !_showControls,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                      child: Row(
+                        children: [
+                          Text(
+                            _formatDuration(
+                              Duration(milliseconds: clampedPosMs.round()),
+                            ),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Expanded(
+                            child: SliderTheme(
+                              data: SliderTheme.of(context).copyWith(
+                                trackHeight: 3.5,
+                                thumbShape: const RoundSliderThumbShape(
+                                  enabledThumbRadius: 6.5,
+                                ),
+                                activeTrackColor: _kAccent,
+                                inactiveTrackColor: Colors.white24,
+                                thumbColor: _kAccent,
+                                overlayColor: _kAccent.withValues(alpha: 0.2),
+                              ),
+                              child: Slider(
+                                value: clampedPosMs,
+                                min: 0,
+                                max: maxMs,
+                                onChangeStart: (_) {
+                                  _hideTimer?.cancel();
+                                  setState(() => _isSeekingSlider = true);
+                                },
+                                onChanged: (v) {
+                                  setState(() => _sliderValueMs = v);
+                                },
+                                onChangeEnd: (v) async {
+                                  await p?.seek(
+                                    Duration(milliseconds: v.round()),
+                                  );
+                                  if (mounted) {
+                                    setState(() => _isSeekingSlider = false);
+                                    _scheduleHideControls();
+                                  }
+                                },
+                              ),
+                            ),
+                          ),
+                          Text(
+                            _formatDuration(duration),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
