@@ -56,7 +56,9 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
   String? _activeDragType; // 'brightness' or 'volume'
   double _dragStartValue = 0.5;
   double _dragStartY = 0;
-  bool _didInitialSeek = false;
+  bool _didInitialFrameCapture = false;
+  bool _hasSurfaceFrame = false;
+  bool _hasFirstFrame = false;
   DateTime _lastProgressSave = DateTime.fromMillisecondsSinceEpoch(0);
 
   static final RegExp _trailingExtRegex = RegExp(
@@ -101,6 +103,8 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
   Future<void> _initAndOpen() async {
     setState(() {
       _errorMessage = null;
+      _hasSurfaceFrame = false;
+      _hasFirstFrame = false;
     });
     try {
       MediaKit.ensureInitialized();
@@ -113,6 +117,15 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
         final vc = VideoController(p);
         _player = p;
         _videoController = vc;
+        vc.waitUntilFirstFrameRendered.then((_) {
+          if (!mounted) return;
+          _hasSurfaceFrame = true;
+          final hasResume = widget.initialPosition != null &&
+              widget.initialPosition! > Duration.zero;
+          if (!hasResume || p.state.position > Duration.zero) {
+            setState(() => _hasFirstFrame = true);
+          }
+        });
 
         _subs.add(
           p.stream.error.listen((msg) {
@@ -143,30 +156,26 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
         _subs.add(
           p.stream.position.listen((pos) {
             if (!mounted || _isSeekingSlider) return;
+            final shouldRevealFirstFrame =
+                !_hasFirstFrame && _hasSurfaceFrame && pos > Duration.zero;
             setState(() {
               _sliderValueMs = pos.inMilliseconds.toDouble();
               if (pos > Duration.zero && _errorMessage != null) {
                 _errorMessage = null;
               }
-            });
-            if (!_didInitialSeek &&
-                widget.initialPosition != null &&
-                widget.initialPosition! > Duration.zero) {
-              if (pos < widget.initialPosition! - const Duration(seconds: 2)) {
-                _didInitialSeek = true;
-                p.seek(widget.initialPosition!);
-              } else if (pos >=
-                  widget.initialPosition! - const Duration(seconds: 2)) {
-                _didInitialSeek = true;
+              if (shouldRevealFirstFrame) {
+                _hasFirstFrame = true;
               }
-            }
+            });
             final now = DateTime.now();
+            if (pos >= const Duration(minutes: 10) &&
+                !_didInitialFrameCapture) {
+              _didInitialFrameCapture = true;
+              unawaited(_captureFrameNow());
+            }
             if (now.difference(_lastProgressSave).inSeconds >= 5) {
               _lastProgressSave = now;
               _saveProgressNow();
-              if (pos >= const Duration(minutes: 20)) {
-                _captureFrameNow();
-              }
             }
           }),
         );
@@ -176,14 +185,7 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
           }),
         );
         _subs.add(
-          p.stream.duration.listen((dur) {
-            if (!_didInitialSeek &&
-                dur > Duration.zero &&
-                widget.initialPosition != null &&
-                widget.initialPosition! > Duration.zero) {
-              _didInitialSeek = true;
-              p.seek(widget.initialPosition!);
-            }
+          p.stream.duration.listen((_) {
             if (mounted) setState(() {});
           }),
         );
@@ -192,6 +194,17 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
             if (mounted) setState(() {});
           }),
         );
+      } else {
+        _videoController?.waitUntilFirstFrameRendered.then((_) {
+          if (!mounted) return;
+          _hasSurfaceFrame = true;
+          final p = _player;
+          final hasResume = widget.initialPosition != null &&
+              widget.initialPosition! > Duration.zero;
+          if (!hasResume || (p != null && p.state.position > Duration.zero)) {
+            setState(() => _hasFirstFrame = true);
+          }
+        });
       }
 
       if (_player!.platform is NativePlayer) {
@@ -203,8 +216,9 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
           native.setProperty('demuxer-lavf-probesize', '500000'),
           native.setProperty('demuxer-lavf-analyzeduration', '1.0'),
           native.setProperty('cache-pause', 'yes'),
-          native.setProperty('cache-pause-initial', 'no'),
+          native.setProperty('cache-pause-initial', 'yes'),
           native.setProperty('cache-pause-wait', '1'),
+          native.setProperty('hr-seek', 'no'),
           native.setProperty(
             'stream-lavf-o',
             'reconnect=1,reconnect_streamed=1,reconnect_delay_max=2',
@@ -264,7 +278,7 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
   @override
   void dispose() {
     final p = _player;
-    if (p != null && p.state.position >= const Duration(minutes: 20)) {
+    if (p != null && p.state.position >= const Duration(minutes: 10)) {
       _captureFrameNow();
     }
     _saveProgressNow();
@@ -782,6 +796,7 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
         : 1.0;
     final clampedPosMs = _sliderValueMs.clamp(0.0, maxMs);
     final buffering = p?.state.buffering ?? false;
+    final showLoading = buffering || !_hasFirstFrame;
     final playing = p?.state.playing ?? false;
 
     return PopScope(
@@ -1009,7 +1024,7 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
               ),
             ),
 
-            if (_errorMessage == null && buffering)
+            if (_errorMessage == null && showLoading)
               const IgnorePointer(
                 child: Center(
                   child: CircularProgressIndicator(
@@ -1142,7 +1157,7 @@ class _MkvStreamPlayerPageState extends State<MkvStreamPlayerPage> {
             ),
 
             // Center Play/Pause/Skip (compact min-size so left/right halves stay interactive)
-            if (_errorMessage == null && !buffering && p != null)
+            if (_errorMessage == null && !showLoading && p != null)
               Center(
                 child: AnimatedOpacity(
                   opacity: _showControls ? 1.0 : 0.0,

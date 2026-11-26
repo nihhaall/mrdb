@@ -30,7 +30,8 @@ class HomePage extends ConsumerStatefulWidget {
   ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends ConsumerState<HomePage> {
+class _HomePageState extends ConsumerState<HomePage>
+    with WidgetsBindingObserver {
   // State variables
   bool _isLoading = false;
   bool _isLoadingMore = false;
@@ -91,6 +92,8 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   // Data
   List<dynamic> _movies = [];
+  List<dynamic> _carouselMovies = [];
+  bool _isCarouselLoading = false;
 
   // Controllers
   final TextEditingController _searchController = TextEditingController();
@@ -103,6 +106,9 @@ class _HomePageState extends ConsumerState<HomePage> {
   Timer? _reconnectTimer;
   bool _isCheckingReconnect = false;
   int _imageRetryEpoch = 0;
+  bool _isRouteCurrent = true;
+  bool _isAppForeground = true;
+  bool _isHomeTabActive = true;
 
   // Constants
   static const int _maxRetryAttempts = 3;
@@ -113,11 +119,50 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _selectedLangCode = widget.lang ?? userDeviceLanguageCode;
     _releaseCategory = ref.read(homeReleaseCategoryProvider);
+    _isHomeTabActive = ref.read(currentIndexProvider) == 0;
     _scrollController.addListener(_onScrollPositionChanged);
     _initializeData();
-    _startHeroAutoSlide();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final isCurrent = ModalRoute.of(context)?.isCurrent ?? true;
+    if (_isRouteCurrent != isCurrent) {
+      _isRouteCurrent = isCurrent;
+    }
+    _syncCarouselAutoPlay();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final foreground = state == AppLifecycleState.resumed;
+    if (_isAppForeground != foreground) {
+      _isAppForeground = foreground;
+      _syncCarouselAutoPlay();
+    }
+  }
+
+  bool get _shouldAutoPlayCarousel =>
+      mounted &&
+      _isRouteCurrent &&
+      _isAppForeground &&
+      _isHomeTabActive &&
+      !_isSearching &&
+      _carouselMovies.length > 1;
+
+  void _syncCarouselAutoPlay() {
+    if (_shouldAutoPlayCarousel) {
+      if (_heroTimer == null || !_heroTimer!.isActive) {
+        _startHeroAutoSlide();
+      }
+    } else {
+      _heroTimer?.cancel();
+      _heroTimer = null;
+    }
   }
 
   void _onScrollPositionChanged() {
@@ -133,8 +178,14 @@ class _HomePageState extends ConsumerState<HomePage> {
   void _startHeroAutoSlide() {
     _heroTimer?.cancel();
     _heroTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (!mounted || !_heroCarouselController.hasClients) return;
-      final nextPage = (_currentHeroPage + 1) % 5;
+      if (!_shouldAutoPlayCarousel || !_heroCarouselController.hasClients) {
+        _heroTimer?.cancel();
+        _heroTimer = null;
+        return;
+      }
+      final count = _carouselMovies.length;
+      if (count <= 1) return;
+      final nextPage = (_currentHeroPage + 1) % count;
       _heroCarouselController.animateToPage(
         nextPage,
         duration: const Duration(milliseconds: 600),
@@ -145,6 +196,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _heroTimer?.cancel();
     _reconnectTimer?.cancel();
     _heroCarouselController.dispose();
@@ -187,6 +239,9 @@ class _HomePageState extends ConsumerState<HomePage> {
             pageNum++;
             _fetchMovies(isLoadMore: true, skipOfflinePrecheck: true);
           }
+          if (_carouselMovies.isEmpty) {
+            _fetchCarouselMovies();
+          }
         }
       } finally {
         _isCheckingReconnect = false;
@@ -195,7 +250,10 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Future<void> _initializeData() async {
-    await _fetchMovies(isInitialLoad: true);
+    await Future.wait([
+      _fetchMovies(isInitialLoad: true),
+      _fetchCarouselMovies(),
+    ]);
   }
 
   // Core supported languages for multi-language discovery when "All" is active
@@ -385,6 +443,194 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
+  Future<void> _fetchCarouselMovies() async {
+    if (!mounted) return;
+    setState(() => _isCarouselLoading = true);
+
+    try {
+      final hasInternet = await NetworkService.instance.hasInternet();
+      if (!hasInternet) {
+        if (mounted) setState(() => _isCarouselLoading = false);
+        return;
+      }
+
+      final now = DateTime.now();
+      final todayDate = DateTime(now.year, now.month, now.day);
+      final lang = _selectedLangCode;
+      final hasLang = lang != null && lang.isNotEmpty;
+
+      String fmtDate(DateTime d) {
+        final m = d.month.toString().padLeft(2, '0');
+        final day = d.day.toString().padLeft(2, '0');
+        return '${d.year}-$m-$day';
+      }
+
+      List<Map<String, dynamic>> filterWindowResults(
+        dynamic data, {
+        required DateTime start,
+        required DateTime end,
+        required double minRating,
+      }) {
+        if (data is! Map) return const [];
+        final raw = data['results'] as List<dynamic>? ?? [];
+        final valid = <Map<String, dynamic>>[];
+        for (final item in raw) {
+          if (item is! Map) continue;
+          final m = Map<String, dynamic>.from(item);
+
+          final backdrop = m['backdrop_path']?.toString().trim();
+          final poster = m['poster_path']?.toString().trim();
+          if (backdrop == null ||
+              backdrop.isEmpty ||
+              backdrop == 'null' ||
+              poster == null ||
+              poster.isEmpty ||
+              poster == 'null') {
+            continue;
+          }
+
+          final releaseStr = (m['release_date'] ?? '').toString().trim();
+          final parsedDate = DateTime.tryParse(releaseStr);
+          if (parsedDate == null) continue;
+          final releaseDay = DateTime(
+            parsedDate.year,
+            parsedDate.month,
+            parsedDate.day,
+          );
+          if (releaseDay.isBefore(start) || releaseDay.isAfter(end)) {
+            continue;
+          }
+
+          final rating = (m['vote_average'] as num?)?.toDouble() ?? 0.0;
+          if (rating < minRating) continue;
+
+          valid.add(m);
+        }
+
+        valid.sort((a, b) {
+          final ratingA = (a['vote_average'] as num?)?.toDouble() ?? 0.0;
+          final ratingB = (b['vote_average'] as num?)?.toDouble() ?? 0.0;
+          final ratingCmp = ratingB.compareTo(ratingA);
+          if (ratingCmp != 0) return ratingCmp;
+          final popA = (a['popularity'] as num?)?.toDouble() ?? 0.0;
+          final popB = (b['popularity'] as num?)?.toDouble() ?? 0.0;
+          return popB.compareTo(popA);
+        });
+        return valid;
+      }
+
+      Future<List<Map<String, dynamic>>> queryWindow({
+        required DateTime start,
+        required DateTime end,
+        String? langCode,
+        required double minVote,
+        required int minCount,
+      }) async {
+        final langParam = (langCode != null && langCode.isNotEmpty)
+            ? '&with_original_language=$langCode'
+            : '';
+        final uri = Uri.parse(
+          'https://api.themoviedb.org/3/discover/movie'
+          '?api_key=${AppConstants.apiKey}'
+          '$langParam'
+          '&primary_release_date.gte=${fmtDate(start)}'
+          '&primary_release_date.lte=${fmtDate(end)}'
+          '&vote_average.gte=$minVote'
+          '&vote_count.gte=$minCount'
+          '&sort_by=vote_average.desc'
+          '&page=1',
+        );
+        final data = await NetworkService.instance.getTmdbUriJson(
+          uri,
+          timeout: const Duration(seconds: 12),
+          maxAttempts: 1,
+        );
+        return filterWindowResults(
+          data,
+          start: start,
+          end: end,
+          minRating: minVote,
+        );
+      }
+
+      final List<Map<String, dynamic>> collected = [];
+      final Set<dynamic> seenIds = {};
+
+      // Start from last month and repeat stepping back month-by-month until we have top rated movies
+      for (int monthOffset = 0;
+          monthOffset < 12 && collected.length < 5;
+          monthOffset++) {
+        final windowEnd = todayDate.subtract(Duration(days: monthOffset * 30));
+        final windowStart = windowEnd.subtract(const Duration(days: 30));
+
+        var monthMatches = await queryWindow(
+          start: windowStart,
+          end: windowEnd,
+          langCode: lang,
+          minVote: hasLang ? 6.0 : 6.5,
+          minCount: hasLang ? 5 : 20,
+        );
+
+        // If a narrow language has fewer high-vote-count titles in this month, check lower vote count in the SAME month
+        if (monthMatches.isEmpty && hasLang) {
+          monthMatches = await queryWindow(
+            start: windowStart,
+            end: windowEnd,
+            langCode: lang,
+            minVote: 5.8,
+            minCount: 2,
+          );
+        }
+
+        for (final m in monthMatches) {
+          if (seenIds.add(m['id'])) {
+            collected.add(m);
+            if (collected.length >= 5) break;
+          }
+        }
+      }
+
+      // If a narrow language had zero qualifying recent releases across 12 months, fall back to global recent months
+      if (collected.isEmpty && hasLang) {
+        for (int monthOffset = 0;
+            monthOffset < 6 && collected.length < 5;
+            monthOffset++) {
+          final windowEnd =
+              todayDate.subtract(Duration(days: monthOffset * 30));
+          final windowStart = windowEnd.subtract(const Duration(days: 30));
+
+          final monthMatches = await queryWindow(
+            start: windowStart,
+            end: windowEnd,
+            langCode: null,
+            minVote: 6.5,
+            minCount: 20,
+          );
+          for (final m in monthMatches) {
+            if (seenIds.add(m['id'])) {
+              collected.add(m);
+              if (collected.length >= 5) break;
+            }
+          }
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _carouselMovies = collected.take(5).toList();
+        _currentHeroPage = 0;
+        _isCarouselLoading = false;
+      });
+      if (_heroCarouselController.hasClients) {
+        _heroCarouselController.jumpToPage(0);
+      }
+      _syncCarouselAutoPlay();
+    } catch (e) {
+      debugPrint('Carousel fetch error: $e');
+      if (mounted) setState(() => _isCarouselLoading = false);
+    }
+  }
+
   void _markSlowConnection() {
     if (mounted && _isLoading && !_isSlowConnection) {
       setState(() => _isSlowConnection = true);
@@ -560,6 +806,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       _errorMessage = null;
       _isSearching = true;
     });
+    _syncCarouselAutoPlay();
 
     final url = Uri.parse(
       'https://api.themoviedb.org/3/search/movie'
@@ -642,6 +889,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       }
     });
     _fetchMovies(isInitialLoad: true);
+    _fetchCarouselMovies();
   }
 
   void _toggleGenre(int genreId) {
@@ -712,7 +960,11 @@ class _HomePageState extends ConsumerState<HomePage> {
       _isSearching = false;
       _searchController.clear();
     });
-    await _fetchMovies(isRefresh: true);
+    _syncCarouselAutoPlay();
+    await Future.wait([
+      _fetchMovies(isRefresh: true),
+      _fetchCarouselMovies(),
+    ]);
     _scrollToTop(animate: false);
   }
 
@@ -721,6 +973,13 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   Widget build(BuildContext context) {
     final favProvider = p.Provider.of<FavoritesProvider>(context);
+    ref.listen<int>(currentIndexProvider, (prev, next) {
+      final isHome = next == 0;
+      if (_isHomeTabActive != isHome) {
+        _isHomeTabActive = isHome;
+        _syncCarouselAutoPlay();
+      }
+    });
     ref.listen<HomeReleaseCategory>(homeReleaseCategoryProvider, (prev, next) {
       if (prev != next) {
         setState(() {
@@ -729,6 +988,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           _isSearching = false;
           _searchController.clear();
         });
+        _syncCarouselAutoPlay();
         _fetchMovies(isInitialLoad: true);
         _scrollToTop(animate: true);
       }
@@ -911,12 +1171,12 @@ class _HomePageState extends ConsumerState<HomePage> {
                               ),
                             ),
 
-                          // 1b. Trending Hero Carousel (when not searching)
+                          // 1b. Trending Hero Carousel (last month, better rated)
                           if (!_isSearching && !(_hasError && _movies.isEmpty))
                             SliverToBoxAdapter(
-                              child: _movies.length >= 3
+                              child: _carouselMovies.isNotEmpty
                                   ? _buildTrendingHeroCarousel()
-                                  : (_isLoading
+                                  : ((_isCarouselLoading || _isLoading)
                                       ? _buildHeroCarouselShimmer()
                                       : const SizedBox.shrink()),
                             ),
@@ -2013,8 +2273,9 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Widget _buildTrendingHeroCarousel() {
-    final heroMovies = _movies
+    final heroMovies = _carouselMovies
         .where((m) =>
+            m is Map &&
             m['backdrop_path'] != null &&
             m['backdrop_path'].toString().isNotEmpty)
         .take(5)
@@ -2040,7 +2301,10 @@ class _HomePageState extends ConsumerState<HomePage> {
                 setState(() => _currentHeroPage = idx);
               },
               itemBuilder: (context, index) {
-                final movie = heroMovies[index] as Map<String, dynamic>;
+                final movie = Map<String, dynamic>.from(
+                  heroMovies[index] as Map,
+                );
+                final movieId = movie['id'];
                 final title =
                     (movie['title'] ?? movie['name'] ?? 'Movie').toString();
                 final backdrop = movie['backdrop_path']?.toString() ?? '';
@@ -2050,6 +2314,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                     rating is num ? rating.toStringAsFixed(1) : rating.toString();
                 final genres = _getMovieGenres(movie);
                 final subtitle = _getMovieSubtitle(movie, genres);
+                final heroTag = 'hero_carousel_$movieId';
+                final titleHeroTag = 'hero_carousel_title_$movieId';
 
                 return InkWell(
                   borderRadius: BorderRadius.circular(18),
@@ -2057,16 +2323,33 @@ class _HomePageState extends ConsumerState<HomePage> {
                     HapticFeedback.lightImpact();
                     Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (context) => MoviePreview(
-                          movieId: movie['id'],
-                          initialMovie: movie,
-                          posterPath: poster,
-                          title: title,
-                          backdropPath: backdrop,
-                          subtitle: subtitle,
-                          heroTag: 'hero_carousel_${movie['id']}',
+                      PageRouteBuilder(
+                        transitionDuration: const Duration(milliseconds: 380),
+                        reverseTransitionDuration: const Duration(
+                          milliseconds: 320,
                         ),
+                        pageBuilder: (context, animation, secondaryAnimation) {
+                          return MoviePreview(
+                            movieId: movieId,
+                            initialMovie: movie,
+                            posterPath: poster,
+                            title: title,
+                            backdropPath: backdrop,
+                            subtitle: subtitle,
+                            backdropHeroTag: heroTag,
+                            titleHeroTag: titleHeroTag,
+                          );
+                        },
+                        transitionsBuilder:
+                            (context, animation, secondaryAnimation, child) {
+                          return FadeTransition(
+                            opacity: CurvedAnimation(
+                              parent: animation,
+                              curve: Curves.easeInOutCubic,
+                            ),
+                            child: child,
+                          );
+                        },
                       ),
                     );
                   },
@@ -2090,24 +2373,65 @@ class _HomePageState extends ConsumerState<HomePage> {
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          // Backdrop image
-                          CachedNetworkImage(
-                            key: ValueKey(
-                              'hero_backdrop_${movie['id']}_$_imageRetryEpoch',
+                          // Hero backdrop image
+                          Hero(
+                            tag: heroTag,
+                            createRectTween: (begin, end) =>
+                                MaterialRectCenterArcTween(
+                              begin: begin,
+                              end: end,
                             ),
-                            imageUrl: '${AppConstants.baseImageUrl}$backdrop',
-                            fit: BoxFit.cover,
-                            placeholder: (context, url) => Shimmer.fromColors(
-                              baseColor: const Color(0xFF161922),
-                              highlightColor: const Color(0xFF222634),
-                              child: Container(color: const Color(0xFF161922)),
-                            ),
-                            errorWidget: (context, url, error) => Container(
-                              color: const Color(0xFF161922),
-                              child: const Icon(
-                                Icons.movie_rounded,
-                                color: Colors.white24,
-                                size: 40,
+                            flightShuttleBuilder: (
+                              flightContext,
+                              animation,
+                              flightDirection,
+                              fromHeroContext,
+                              toHeroContext,
+                            ) {
+                              final Widget toHeroWidget =
+                                  (toHeroContext.widget is Hero)
+                                      ? (toHeroContext.widget as Hero).child
+                                      : toHeroContext.widget;
+                              return AnimatedBuilder(
+                                animation: animation,
+                                child: toHeroWidget,
+                                builder: (context, child) {
+                                  final radius = 18.0 * (1.0 - animation.value);
+                                  return Material(
+                                    type: MaterialType.transparency,
+                                    child: ClipRRect(
+                                      borderRadius:
+                                          BorderRadius.circular(radius),
+                                      child: child,
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                            child: Material(
+                              type: MaterialType.transparency,
+                              child: CachedNetworkImage(
+                                key: ValueKey(
+                                  'hero_backdrop_${movieId}_$_imageRetryEpoch',
+                                ),
+                                imageUrl:
+                                    '${AppConstants.baseImageUrl}$backdrop',
+                                fit: BoxFit.cover,
+                                placeholder: (context, url) =>
+                                    Shimmer.fromColors(
+                                  baseColor: const Color(0xFF161922),
+                                  highlightColor: const Color(0xFF222634),
+                                  child:
+                                      Container(color: const Color(0xFF161922)),
+                                ),
+                                errorWidget: (context, url, error) => Container(
+                                  color: const Color(0xFF161922),
+                                  child: const Icon(
+                                    Icons.movie_rounded,
+                                    color: Colors.white24,
+                                    size: 40,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -2158,7 +2482,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                                               ),
                                             ),
                                             child: const Text(
-                                              'FEATURED',
+                                              'TOP RATED',
                                               style: TextStyle(
                                                 color: Color(0xFF00E5A0),
                                                 fontSize: 9.5,
@@ -2192,15 +2516,21 @@ class _HomePageState extends ConsumerState<HomePage> {
                                         ],
                                       ),
                                       const SizedBox(height: 4),
-                                      Text(
-                                        title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w900,
-                                          letterSpacing: -0.2,
+                                      Hero(
+                                        tag: titleHeroTag,
+                                        child: Material(
+                                          type: MaterialType.transparency,
+                                          child: Text(
+                                            title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w900,
+                                              letterSpacing: -0.2,
+                                            ),
+                                          ),
                                         ),
                                       ),
                                       if (subtitle.isNotEmpty)

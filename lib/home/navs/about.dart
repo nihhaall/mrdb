@@ -11,7 +11,7 @@ import 'package:mrdb/home/navs/owner/manage_clients_page.dart';
 import 'package:mrdb/home/navs/owner/telegram_videos_page.dart';
 import 'package:mrdb/services/app_update_service.dart';
 import 'package:mrdb/services/network_service.dart';
-import 'package:mrdb/widgets/app_update_sheet.dart';
+import 'package:mrdb/widgets/app_update_capsule.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../main.dart';
@@ -391,6 +391,13 @@ class _AboutState extends ConsumerState<About> {
   Future<void> _handleCheckForUpdates() async {
     if (_isCheckingUpdate) return;
     HapticFeedback.lightImpact();
+
+    final current = AppUpdateService.instance.state;
+    if (current.hasAvailableUpdate && current.info != null) {
+      AppUpdateCapsuleController.instance.expand();
+      return;
+    }
+
     setState(() => _isCheckingUpdate = true);
 
     try {
@@ -409,11 +416,11 @@ class _AboutState extends ConsumerState<About> {
       );
       if (!mounted) return;
       if (update != null) {
-        await AppUpdateSheet.show(context, update);
+        AppUpdateCapsuleController.instance.expand();
       } else {
         showScaffoldMsg(
           context,
-          txt: 'You are on the latest version (v$_appVersion)',
+          txt: 'MRDb is up to date (v$_appVersion)',
         );
       }
     } finally {
@@ -422,68 +429,166 @@ class _AboutState extends ConsumerState<About> {
   }
 
   Widget _buildUpdateCheckCard() {
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: _isCheckingUpdate ? null : _handleCheckForUpdates,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: _kCardBg,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _kCardBorder),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: _kAccent.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(10),
+    return ListenableBuilder(
+      listenable: AppUpdateService.instance,
+      builder: (context, _) {
+        final state = AppUpdateService.instance.state;
+        final info = state.info;
+        final hasUpdate = state.hasAvailableUpdate && info != null;
+        final isDownloading = state.isDownloadingOrVerifying;
+        final isReady = state.phase == AppUpdatePhase.readyToInstall ||
+            state.phase == AppUpdatePhase.installing;
+        final needsPermission = state.phase == AppUpdatePhase.needsPermission;
+
+        final Color accentColor = needsPermission ? const Color(0xFFFFB74D) : _kAccent;
+
+        String title = 'Check for App Updates';
+        String subtitle = 'Current version v$_appVersion';
+        if (isDownloading) {
+          final pct = state.progress != null
+              ? '${(state.progress! * 100).round()}% • '
+              : '';
+          title = 'Downloading Update...';
+          subtitle = '$pct${state.formattedProgress}';
+        } else if (isReady && info != null) {
+          title = 'Update Ready to Install';
+          subtitle = 'Tap to install v${info.latestVersion}';
+        } else if (needsPermission && info != null) {
+          title = 'Finish App Update';
+          subtitle = 'Permission needed for v${info.latestVersion}';
+        } else if (hasUpdate) {
+          title = 'Update Available';
+          subtitle = 'v$_appVersion  →  v${info.latestVersion}';
+        }
+
+        return InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: _isCheckingUpdate ? null : _handleCheckForUpdates,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 14),
+            decoration: BoxDecoration(
+              gradient: hasUpdate
+                  ? LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        accentColor.withValues(alpha: 0.13),
+                        _kCardBg,
+                      ],
+                    )
+                  : null,
+              color: hasUpdate ? null : _kCardBg,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: hasUpdate
+                    ? accentColor.withValues(alpha: 0.5)
+                    : _kCardBorder,
+                width: hasUpdate ? 1.2 : 1,
               ),
-              child: const Icon(
-                Icons.system_update_rounded,
-                color: _kAccent,
-                size: 20,
-              ),
+              boxShadow: hasUpdate
+                  ? [
+                      BoxShadow(
+                        color: accentColor.withValues(alpha: 0.1),
+                        blurRadius: 16,
+                        offset: const Offset(0, 4),
+                      ),
+                    ]
+                  : null,
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Check for App Updates',
-                    style: TextStyle(
-                      color: _kTextPrimary,
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: hasUpdate ? 0.18 : 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: accentColor.withValues(alpha: hasUpdate ? 0.35 : 0.15),
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Current version v$_appVersion',
-                    style: const TextStyle(
-                      color: _kTextSecondary,
-                      fontSize: 11.5,
-                    ),
+                  child: Icon(
+                    isReady
+                        ? Icons.install_mobile_rounded
+                        : (hasUpdate
+                            ? Icons.auto_awesome_rounded
+                            : Icons.system_update_rounded),
+                    color: accentColor,
+                    size: 20,
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: _kTextPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          color: hasUpdate ? accentColor : _kTextSecondary,
+                          fontSize: 11.5,
+                          fontWeight:
+                              hasUpdate ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_isCheckingUpdate)
+                  LoadingAnimationWidget.threeArchedCircle(
+                    color: _kAccent,
+                    size: 18,
+                  )
+                else if (isDownloading)
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      value: state.progress,
+                      strokeWidth: 2.3,
+                      color: accentColor,
+                      backgroundColor: Colors.white12,
+                    ),
+                  )
+                else if (hasUpdate)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: accentColor,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      isReady ? 'Install' : 'Update',
+                      style: const TextStyle(
+                        color: Color(0xFF0A0D14),
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  )
+                else
+                  const Icon(
+                    Icons.arrow_forward_ios_rounded,
+                    color: _kTextSecondary,
+                    size: 14,
+                  ),
+              ],
             ),
-            if (_isCheckingUpdate)
-              LoadingAnimationWidget.threeArchedCircle(
-                color: _kAccent,
-                size: 18,
-              )
-            else
-              const Icon(
-                Icons.arrow_forward_ios_rounded,
-                color: _kTextSecondary,
-                size: 14,
-              ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 

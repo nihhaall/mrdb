@@ -7,6 +7,7 @@ import 'package:mrdb/constens/keys.dart';
 import 'package:mrdb/home/navs/first_page/preview_page.dart';
 import 'package:mrdb/main.dart';
 import 'package:mrdb/services/telegram_stream_service.dart';
+import 'package:mrdb/services/video_frame_thumbnail_service.dart';
 import 'package:mrdb/widgets/mkv_stream_player_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shimmer/shimmer.dart';
@@ -55,11 +56,13 @@ class _TelegramVideosPageState extends State<TelegramVideosPage> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    VideoFrameThumbnailService.instance.addListener(_onFrameExtracted);
     _loadInitial();
   }
 
   @override
   void dispose() {
+    VideoFrameThumbnailService.instance.removeListener(_onFrameExtracted);
     _searchDebounce?.cancel();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
@@ -67,6 +70,15 @@ class _TelegramVideosPageState extends State<TelegramVideosPage> {
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
+  }
+
+  void _onFrameExtracted() {
+    if (!mounted) return;
+    final extracted = VideoFrameThumbnailService.instance.cachedPaths;
+    if (extracted.isNotEmpty) {
+      _capturedFrames.addAll(extracted);
+    }
+    setState(() {});
   }
 
   void _onScroll() {
@@ -78,6 +90,7 @@ class _TelegramVideosPageState extends State<TelegramVideosPage> {
   }
 
   Future<void> _loadInitial() async {
+    VideoFrameThumbnailService.instance.clearFailedCache();
     setState(() {
       _loadingFeed = true;
       _feedError = null;
@@ -437,13 +450,21 @@ class _TelegramVideosPageState extends State<TelegramVideosPage> {
     return '${two(m)}:${two(s)}';
   }
 
+  void _scheduleFrameExtraction(TelegramVideoItem item) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      VideoFrameThumbnailService.instance.requestFrame(item);
+    });
+  }
+
   Widget _buildThumbnailWidget(
     TelegramVideoItem item, {
     BoxFit fit = BoxFit.cover,
     Widget? fallback,
   }) {
     final key = TelegramStreamService.progressKeyFor(item);
-    final localPath = _capturedFrames[key];
+    final localPath =
+        _capturedFrames[key] ?? VideoFrameThumbnailService.instance.pathFor(key);
     if (localPath != null &&
         localPath.isNotEmpty &&
         File(localPath).existsSync()) {
@@ -452,6 +473,7 @@ class _TelegramVideosPageState extends State<TelegramVideosPage> {
         fit: fit,
         errorBuilder: (_, _, _) => _buildNetworkOrFallbackThumb(
           item,
+          key: key,
           fit: fit,
           fallback: fallback,
         ),
@@ -459,6 +481,7 @@ class _TelegramVideosPageState extends State<TelegramVideosPage> {
     }
     return _buildNetworkOrFallbackThumb(
       item,
+      key: key,
       fit: fit,
       fallback: fallback,
     );
@@ -466,18 +489,36 @@ class _TelegramVideosPageState extends State<TelegramVideosPage> {
 
   Widget _buildNetworkOrFallbackThumb(
     TelegramVideoItem item, {
+    required String key,
     BoxFit fit = BoxFit.cover,
     Widget? fallback,
   }) {
+    final isExtracting = VideoFrameThumbnailService.instance.isExtracting(key);
+    final effectiveFallback = isExtracting
+        ? Shimmer.fromColors(
+            baseColor: _kSurfaceLight,
+            highlightColor: const Color(0xFF232532),
+            child: Container(color: _kSurfaceLight),
+          )
+        : (fallback ?? Container(color: _kSurfaceLight));
+
     if (item.thumbUrl != null && item.thumbUrl!.isNotEmpty) {
       return CachedNetworkImage(
         imageUrl: item.thumbUrl!,
         fit: fit,
-        placeholder: (_, _) => fallback ?? Container(color: _kSurfaceLight),
-        errorWidget: (_, _, _) => fallback ?? Container(color: _kSurfaceLight),
+        placeholder: (_, _) => effectiveFallback,
+        errorWidget: (_, _, _) {
+          _scheduleFrameExtraction(item);
+          return effectiveFallback;
+        },
       );
     }
-    return fallback ?? Container(color: _kSurfaceLight);
+
+    if (!isExtracting &&
+        VideoFrameThumbnailService.instance.pathFor(key) == null) {
+      _scheduleFrameExtraction(item);
+    }
+    return effectiveFallback;
   }
 
   Future<void> _openVideo(

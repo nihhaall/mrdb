@@ -38,79 +38,11 @@ class _FavoriteState extends ConsumerState<Favorite> {
   ) async {
     HapticFeedback.mediumImpact();
     final movieId = item['movId'] ?? item['id'];
-    final String title = (item['title'] ?? 'Movie').toString();
 
     if (movieId == null) return;
 
     // Use provider to remove favorite (optimistic & synced)
     await favProvider.removeFavorite(movieId);
-
-    // Friendly floating undo SnackBar
-    if (mounted) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: const Color(0xFF161824),
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-            side: const BorderSide(color: Color(0xFF282D3D), width: 1),
-          ),
-          content: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF4D4D).withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.favorite_border_rounded,
-                  color: Color(0xFFFF5252),
-                  size: 16,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Removed from favorites',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 11.5,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          action: SnackBarAction(
-            label: 'UNDO',
-            textColor: const Color(0xFF00E5A0),
-            onPressed: () {
-              HapticFeedback.lightImpact();
-              favProvider.restoreFavorite(item, index);
-            },
-          ),
-          duration: const Duration(seconds: 4),
-        ),
-      );
-    }
   }
 
   Future<void> _showClearAllBottomSheet(FavoritesProvider favProvider) async {
@@ -229,26 +161,6 @@ class _FavoriteState extends ConsumerState<Favorite> {
         await favProvider.clearAll();
         if (mounted) {
           _searchController.clear();
-          ScaffoldMessenger.of(context).clearSnackBars();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              backgroundColor: const Color(0xFF161824),
-              behavior: SnackBarBehavior.floating,
-              margin: const EdgeInsets.all(16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: const BorderSide(color: Color(0xFF282D3D)),
-              ),
-              content: const Text(
-                'Cleared all favorites',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              duration: const Duration(seconds: 2),
-            ),
-          );
         }
       } catch (e) {
         debugPrint('Clear all error: $e');

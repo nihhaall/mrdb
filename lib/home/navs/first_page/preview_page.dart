@@ -43,6 +43,7 @@ class MoviePreview extends StatefulWidget {
   final String? subtitle;
   final String? heroTag;
   final String? titleHeroTag;
+  final String? backdropHeroTag;
 
   const MoviePreview({
     super.key,
@@ -55,6 +56,7 @@ class MoviePreview extends StatefulWidget {
     this.subtitle,
     this.heroTag,
     this.titleHeroTag,
+    this.backdropHeroTag,
   });
 
   @override
@@ -2250,16 +2252,19 @@ class _MoviePreviewState extends State<MoviePreview>
                             children: [
                               // 1. Single Movie Backdrop Image (consistent, no image swap)
                               Positioned.fill(
-                                child: CachedNetworkImage(
-                                  key: ValueKey(
-                                    'preview_backdrop_${backdrop}_$_imageRetryEpoch',
-                                  ),
-                                  imageUrl: backdrop,
-                                  fit: BoxFit.cover,
-                                  placeholder: (context, url) =>
-                                      Container(color: const Color(0xFF14141E)),
-                                  errorWidget: (context, url, error) =>
-                                      Container(
+                                child: Builder(
+                                  builder: (context) {
+                                    final backdropImage = CachedNetworkImage(
+                                      key: ValueKey(
+                                        'preview_backdrop_${backdrop}_$_imageRetryEpoch',
+                                      ),
+                                      imageUrl: backdrop,
+                                      fit: BoxFit.cover,
+                                      placeholder: (context, url) => Container(
+                                        color: const Color(0xFF14141E),
+                                      ),
+                                      errorWidget: (context, url, error) =>
+                                          Container(
                                         color: const Color(0xFF14141E),
                                         child: const Icon(
                                           Icons.movie_creation_outlined,
@@ -2267,6 +2272,23 @@ class _MoviePreviewState extends State<MoviePreview>
                                           color: Colors.white24,
                                         ),
                                       ),
+                                    );
+                                    if (widget.backdropHeroTag == null) {
+                                      return backdropImage;
+                                    }
+                                    return Hero(
+                                      tag: widget.backdropHeroTag!,
+                                      createRectTween: (begin, end) =>
+                                          MaterialRectCenterArcTween(
+                                        begin: begin,
+                                        end: end,
+                                      ),
+                                      child: Material(
+                                        type: MaterialType.transparency,
+                                        child: backdropImage,
+                                      ),
+                                    );
+                                  },
                                 ),
                               ),
 
@@ -2389,20 +2411,9 @@ class _MoviePreviewState extends State<MoviePreview>
                                         SizedBox(
                                           width: 96,
                                           height: 140,
-                                          child: Hero(
-                                            tag:
-                                                widget.heroTag ??
-                                                'movie_hero_${widget.movieId}',
-                                            createRectTween: (begin, end) =>
-                                                MaterialRectCenterArcTween(
-                                                  begin: begin,
-                                                  end: end,
-                                                ),
-                                            flightShuttleBuilder:
-                                                _buildPosterFlightShuttle,
-                                            child: Material(
-                                              type: MaterialType.transparency,
-                                              child: Container(
+                                          child: Builder(
+                                            builder: (context) {
+                                              final posterCard = Container(
                                                 decoration: BoxDecoration(
                                                   borderRadius:
                                                       BorderRadius.circular(14),
@@ -2439,31 +2450,92 @@ class _MoviePreviewState extends State<MoviePreview>
                                                     placeholder:
                                                         (context, url) =>
                                                             Container(
-                                                              color:
-                                                                  const Color(
-                                                                    0xFF181824,
-                                                                  ),
-                                                            ),
-                                                    errorWidget:
-                                                        (
-                                                          context,
-                                                          url,
-                                                          error,
-                                                        ) => Container(
-                                                          color: const Color(
-                                                            0xFF181824,
-                                                          ),
-                                                          child: const Icon(
-                                                            Icons
-                                                                .broken_image_rounded,
-                                                            color:
-                                                                Colors.white38,
-                                                          ),
-                                                        ),
+                                                      color: const Color(
+                                                        0xFF181824,
+                                                      ),
+                                                    ),
+                                                    errorWidget: (
+                                                      context,
+                                                      url,
+                                                      error,
+                                                    ) =>
+                                                        Container(
+                                                      color: const Color(
+                                                        0xFF181824,
+                                                      ),
+                                                      child: const Icon(
+                                                        Icons
+                                                            .broken_image_rounded,
+                                                        color: Colors.white38,
+                                                      ),
+                                                    ),
                                                   ),
                                                 ),
-                                              ),
-                                            ),
+                                              );
+
+                                              if (widget.backdropHeroTag !=
+                                                  null) {
+                                                final routeAnim = ModalRoute.of(
+                                                  context,
+                                                )?.animation;
+                                                if (routeAnim != null) {
+                                                  final curved =
+                                                      CurvedAnimation(
+                                                    parent: routeAnim,
+                                                    curve: const Interval(
+                                                      0.18,
+                                                      1.0,
+                                                      curve:
+                                                          Curves.easeOutCubic,
+                                                    ),
+                                                  );
+                                                  return AnimatedBuilder(
+                                                    animation: curved,
+                                                    child: posterCard,
+                                                    builder: (context, child) {
+                                                      final t = curved.value;
+                                                      return Opacity(
+                                                        opacity:
+                                                            t.clamp(0.0, 1.0),
+                                                        child:
+                                                            Transform.translate(
+                                                          offset: Offset(
+                                                            0,
+                                                            20 * (1.0 - t),
+                                                          ),
+                                                          child:
+                                                              Transform.scale(
+                                                            scale:
+                                                                0.88 + 0.12 * t,
+                                                            alignment: Alignment
+                                                                .bottomCenter,
+                                                            child: child,
+                                                          ),
+                                                        ),
+                                                      );
+                                                    },
+                                                  );
+                                                }
+                                                return posterCard;
+                                              }
+
+                                              return Hero(
+                                                tag: widget.heroTag ??
+                                                    'movie_hero_${widget.movieId}',
+                                                createRectTween: (begin, end) =>
+                                                    MaterialRectCenterArcTween(
+                                                  begin: begin,
+                                                  end: end,
+                                                ),
+                                                flightShuttleBuilder:
+                                                    _buildPosterFlightShuttle,
+                                                child: Material(
+                                                  type:
+                                                      MaterialType.transparency,
+                                                  child: posterCard,
+                                                ),
+                                              );
+                                            },
                                           ),
                                         ),
                                         const SizedBox(width: 14),

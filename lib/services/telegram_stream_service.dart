@@ -249,7 +249,7 @@ class TelegramStreamService {
   }
 
   static const String _prefCapturedFramesKey =
-      'telegram_stream_captured_frames';
+      'telegram_stream_captured_frames_10m';
 
   Future<String?> saveCapturedFrame(String key, Uint8List bytes) async {
     final trimmed = key.trim();

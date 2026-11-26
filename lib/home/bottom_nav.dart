@@ -9,7 +9,7 @@ import 'package:mrdb/home/navs/first_page/home_page.dart';
 import 'package:mrdb/main.dart';
 import 'package:mrdb/services/app_update_service.dart';
 import 'package:mrdb/services/release_notification_service.dart';
-import 'package:mrdb/widgets/app_update_sheet.dart';
+import 'package:mrdb/widgets/app_update_capsule.dart';
 
 // ─── Enums & Providers ────────────────────────────────────────────────────────
 enum HomeReleaseCategory { nowReleased, upcoming }
@@ -45,7 +45,9 @@ class _MainScreenState extends ConsumerState<MainScreen> {
   Future<void> _checkAppUpdate() async {
     final update = await AppUpdateService.instance.checkForUpdate();
     if (update != null && mounted) {
-      await AppUpdateSheet.show(context, update);
+      AppUpdateCapsuleController.instance.reveal(
+        expanded: update.forceUpdate,
+      );
     }
   }
 
@@ -111,10 +113,31 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     // ── Satellite Home Option Bubble (Friendly & Simple!) ──
-                    if (_showHomePopup && currentInd == 0) ...[
-                      _buildSatellitePopup(releaseCategory),
-                      const SizedBox(height: 10),
-                    ],
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      reverseDuration: const Duration(milliseconds: 160),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      transitionBuilder: (child, anim) => FadeTransition(
+                        opacity: anim,
+                        child: ScaleTransition(
+                          scale: Tween<double>(begin: 0.9, end: 1.0).animate(
+                            anim,
+                          ),
+                          alignment: Alignment.bottomCenter,
+                          child: child,
+                        ),
+                      ),
+                      child: (_showHomePopup && currentInd == 0)
+                          ? Padding(
+                              key: const ValueKey('home_satellite_open'),
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: _buildSatellitePopup(releaseCategory),
+                            )
+                          : const SizedBox.shrink(
+                              key: ValueKey('home_satellite_closed'),
+                            ),
+                    ),
 
                     // ── Main Floating Nav Bar ──
                     Container(
@@ -180,7 +203,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                               onTap: () {
                                 HapticFeedback.lightImpact();
                                 if (currentInd != index) {
-                                  setState(() => _showHomePopup = false);
+                                  setState(() => _showHomePopup = isHomeItem);
                                   ref.read(currentIndexProvider.notifier).state =
                                       index;
                                 } else if (isHomeItem) {
@@ -227,12 +250,42 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(
-                                      isSelected ? activeIcon : item['icon'],
-                                      color: isSelected
-                                          ? activeColor
-                                          : Colors.white38,
-                                      size: 20,
+                                    ListenableBuilder(
+                                      listenable: AppUpdateService.instance,
+                                      builder: (context, _) {
+                                        final showDot = index == 2 &&
+                                            AppUpdateService
+                                                .instance
+                                                .state
+                                                .hasAvailableUpdate;
+                                        return Stack(
+                                          clipBehavior: Clip.none,
+                                          children: [
+                                            Icon(
+                                              isSelected
+                                                  ? activeIcon
+                                                  : item['icon'],
+                                              color: isSelected
+                                                  ? activeColor
+                                                  : Colors.white38,
+                                              size: 20,
+                                            ),
+                                            if (showDot)
+                                              Positioned(
+                                                right: -3,
+                                                top: -2,
+                                                child: Container(
+                                                  width: 7,
+                                                  height: 7,
+                                                  decoration: const BoxDecoration(
+                                                    color: _kAccent,
+                                                    shape: BoxShape.circle,
+                                                  ),
+                                                ),
+                                              ),
+                                          ],
+                                        );
+                                      },
                                     ),
                                     if (isSelected) ...[
                                       const SizedBox(width: 6),
@@ -271,6 +324,10 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                 ),
               ),
             ),
+          ),
+          // 4. Floating Morphing App Update Capsule
+          AppUpdateCapsule(
+            hideCompact: _showHomePopup && currentInd == 0,
           ),
         ],
       ),
@@ -405,27 +462,6 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                       color: isUpcoming ? _kUpcomingAccent : Colors.white70,
                       fontSize: 12,
                       fontWeight: isUpcoming ? FontWeight.bold : FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(width: 5),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 1,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _kUpcomingAccent.withValues(
-                        alpha: isUpcoming ? 0.3 : 0.15,
-                      ),
-                      borderRadius: BorderRadius.circular(5),
-                    ),
-                    child: const Text(
-                      'SOON',
-                      style: TextStyle(
-                        color: _kUpcomingAccent,
-                        fontSize: 8.5,
-                        fontWeight: FontWeight.w900,
-                      ),
                     ),
                   ),
                 ],

@@ -1,5 +1,8 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mrdb/services/telegram_stream_service.dart';
+import 'package:mrdb/services/video_frame_thumbnail_service.dart';
 
 void main() {
   group('TelegramStreamService', () {
@@ -65,6 +68,82 @@ void main() {
         isTrue,
       );
       expect(TelegramStreamService.isValidStreamUrl('MRDB-12-AB12CD'), isFalse);
+    });
+  });
+
+  group('VideoFrameThumbnailService', () {
+    test('deduplicates requests and falls back when primary returns null',
+        () async {
+      int primaryCalls = 0;
+      int fallbackCalls = 0;
+      int notifyCount = 0;
+
+      final service = VideoFrameThumbnailService.forTest(
+        primaryExtractor: (_) async {
+          primaryCalls++;
+          return null;
+        },
+        fallbackExtractor: (_) async {
+          fallbackCalls++;
+          return Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xD9]);
+        },
+        saveFrame: (key, bytes) async => '/tmp/frame_$key.jpg',
+      );
+      service.addListener(() => notifyCount++);
+
+      const item = TelegramVideoItem(
+        msgId: 101,
+        hash: 'abc123',
+        streamCode: 'MRDB-101-ABC123',
+        title: 'Test Movie',
+        fileName: 'Test.Movie.mkv',
+        streamUrl: 'https://example.com/101/Test.Movie.mkv?hash=abc123',
+      );
+
+      service.requestFrame(item);
+      service.requestFrame(item); // Duplicate while in-flight/cached
+
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(primaryCalls, 1);
+      expect(fallbackCalls, 1);
+      expect(service.pathFor('MRDB-101-ABC123'), '/tmp/frame_MRDB-101-ABC123.jpg');
+      expect(service.isExtracting('MRDB-101-ABC123'), isFalse);
+      expect(notifyCount, greaterThanOrEqualTo(2));
+    });
+
+    test('caches failures until clearFailedCache is called', () async {
+      int attempts = 0;
+      final service = VideoFrameThumbnailService.forTest(
+        primaryExtractor: (_) async {
+          attempts++;
+          return null;
+        },
+      );
+
+      const item = TelegramVideoItem(
+        msgId: 202,
+        hash: 'def456',
+        streamCode: 'MRDB-202-DEF456',
+        title: 'Broken Movie',
+        fileName: 'Broken.mkv',
+        streamUrl: 'https://example.com/202/Broken.mkv?hash=def456',
+      );
+
+      service.requestFrame(item);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(attempts, 1);
+
+      // Should not retry while cached as failed
+      service.requestFrame(item);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(attempts, 1);
+
+      // Clearing failed cache allows retry
+      service.clearFailedCache();
+      service.requestFrame(item);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(attempts, 2);
     });
   });
 }

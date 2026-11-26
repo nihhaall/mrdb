@@ -275,33 +275,7 @@ void main() async {
 
 dynamic wt;
 dynamic ht;
-void showScaffoldMsg(BuildContext context, {required String txt}) {
-  ScaffoldMessenger.of(context)
-    ..clearSnackBars()
-    ..showSnackBar(
-    SnackBar(
-      duration: Duration(seconds: 1),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadiusGeometry.circular(wt * 0.1),
-      ),
-      width: wt * 0.95,
-      showCloseIcon: true,
-      closeIconColor: Colors.black.withValues(alpha: 0.5),
-      behavior: SnackBarBehavior.floating,
-      backgroundColor: Colors.white.withValues(alpha: 0.8),
-      content: Center(
-        child: Text(
-          txt,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: Colors.black.withValues(alpha: 0.8),
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-    ),
-  );
-}
+void showScaffoldMsg(BuildContext context, {required String txt}) {}
 
 class MRDb extends StatelessWidget {
   const MRDb({super.key});
