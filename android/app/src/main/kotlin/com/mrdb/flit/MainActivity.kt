@@ -5,12 +5,18 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.media.AudioManager
 import android.media.MediaMetadataRetriever
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.provider.Settings
+import android.view.WindowManager
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -21,9 +27,99 @@ import kotlin.math.roundToInt
 
 class MainActivity : FlutterActivity() {
     private val playerChannelName = "com.mrdb.flit/player_controls"
+    private val playerNetworkChannelName = "com.mrdb.flit/player_network"
     private val updaterChannelName = "com.mrdb.flit/app_updater"
     private val videoThumbChannelName = "com.mrdb.flit/video_thumbnail"
     private val thumbExecutor = Executors.newFixedThreadPool(2)
+    @Volatile
+    private var playerActive = false
+    private var wifiLock: WifiManager.WifiLock? = null
+    private var networkSink: EventChannel.EventSink? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    private fun currentTransportLabel(): String {
+        return try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = cm.activeNetwork ?: return "Offline"
+            val caps = cm.getNetworkCapabilities(network) ?: return "Offline"
+            val hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            if (!hasInternet) return "Offline"
+            when {
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Cellular"
+                else -> "Online"
+            }
+        } catch (_: Exception) {
+            "Online"
+        }
+    }
+
+    private fun setPlayerPerformanceMode(enabled: Boolean) {
+        playerActive = enabled
+        if (enabled) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            try {
+                if (wifiLock == null) {
+                    val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                    val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                    } else {
+                        @Suppress("DEPRECATION")
+                        WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                    }
+                    wifiLock = wm.createWifiLock(mode, "mrdb:player_wifi_lock").apply {
+                        setReferenceCounted(false)
+                    }
+                }
+                if (wifiLock?.isHeld == false) {
+                    wifiLock?.acquire()
+                }
+            } catch (_: Exception) {
+            }
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            try {
+                if (wifiLock?.isHeld == true) {
+                    wifiLock?.release()
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun registerNetworkListener() {
+        unregisterNetworkListener()
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val cb = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    runOnUiThread { networkSink?.success(currentTransportLabel()) }
+                }
+
+                override fun onLost(network: Network) {
+                    runOnUiThread { networkSink?.success(currentTransportLabel()) }
+                }
+
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                    runOnUiThread { networkSink?.success(currentTransportLabel()) }
+                }
+            }
+            cm.registerDefaultNetworkCallback(cb)
+            networkCallback = cb
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun unregisterNetworkListener() {
+        val cb = networkCallback ?: return
+        networkCallback = null
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            cm.unregisterNetworkCallback(cb)
+        } catch (_: Exception) {
+        }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -73,9 +169,31 @@ class MainActivity : FlutterActivity() {
                         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
                         result.success(null)
                     }
+                    "setPlayerPerformanceMode" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        setPlayerPerformanceMode(enabled)
+                        result.success(currentTransportLabel())
+                    }
+                    "getNetworkType" -> {
+                        result.success(currentTransportLabel())
+                    }
                     else -> result.notImplemented()
                 }
             }
+
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, playerNetworkChannelName)
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    networkSink = events
+                    events?.success(currentTransportLabel())
+                    registerNetworkListener()
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    networkSink = null
+                    unregisterNetworkListener()
+                }
+            })
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, updaterChannelName)
             .setMethodCallHandler { call, result ->
@@ -205,6 +323,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun extractFrameJpeg(url: String, timeMs: Long): ByteArray? {
+        if (playerActive) return null
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(url, hashMapOf("User-Agent" to "MRDb/1.0"))
@@ -247,5 +366,11 @@ class MainActivity : FlutterActivity() {
             } catch (_: Exception) {
             }
         }
+    }
+
+    override fun onDestroy() {
+        setPlayerPerformanceMode(false)
+        unregisterNetworkListener()
+        super.onDestroy()
     }
 }

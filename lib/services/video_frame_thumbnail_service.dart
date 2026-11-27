@@ -51,8 +51,11 @@ class VideoFrameThumbnailService extends ChangeNotifier {
   final Set<String> _failedKeys = {};
   final Queue<_FrameJob> _queue = Queue<_FrameJob>();
   int _activeCount = 0;
+  bool _paused = false;
 
   Map<String, String> get cachedPaths => Map.unmodifiable(_cachedPaths);
+
+  bool get isPaused => _paused;
 
   bool isExtracting(String key) => _inFlightKeys.contains(key);
 
@@ -60,6 +63,20 @@ class VideoFrameThumbnailService extends ChangeNotifier {
 
   void clearFailedCache() {
     _failedKeys.clear();
+  }
+
+  @visibleForTesting
+  void clearQueueForTest() {
+    _queue.clear();
+    _inFlightKeys.clear();
+  }
+
+  void setPaused(bool paused) {
+    if (_paused == paused) return;
+    _paused = paused;
+    if (!_paused) {
+      _pumpQueue();
+    }
   }
 
   void requestFrame(TelegramVideoItem item) {
@@ -79,6 +96,7 @@ class VideoFrameThumbnailService extends ChangeNotifier {
   }
 
   void _pumpQueue() {
+    if (_paused) return;
     while (_activeCount < _maxConcurrent && _queue.isNotEmpty) {
       final job = _queue.removeFirst();
       _activeCount++;
@@ -87,9 +105,21 @@ class VideoFrameThumbnailService extends ChangeNotifier {
   }
 
   Future<void> _runJob(_FrameJob job) async {
+    var requeued = false;
     try {
+      if (_paused) {
+        _queue.addFirst(job);
+        requeued = true;
+        return;
+      }
       Uint8List? bytes = await _primaryExtractor(job.streamUrl);
-      if (bytes == null || bytes.isEmpty) {
+      if (_paused) {
+        if (bytes == null || bytes.isEmpty) {
+          _queue.addFirst(job);
+          requeued = true;
+          return;
+        }
+      } else if (bytes == null || bytes.isEmpty) {
         bytes = await _fallbackExtractor(job.streamUrl);
       }
 
@@ -106,7 +136,9 @@ class VideoFrameThumbnailService extends ChangeNotifier {
     } catch (_) {
       _failedKeys.add(job.key);
     } finally {
-      _inFlightKeys.remove(job.key);
+      if (!requeued) {
+        _inFlightKeys.remove(job.key);
+      }
       _activeCount = (_activeCount - 1).clamp(0, _maxConcurrent);
       notifyListeners();
       _pumpQueue();

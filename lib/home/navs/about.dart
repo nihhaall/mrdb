@@ -6,8 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:mrdb/constens/keys.dart';
 import 'package:mrdb/home/bottom_nav.dart';
-import 'package:mrdb/home/navs/owner/bot_manager_page.dart';
-import 'package:mrdb/home/navs/owner/manage_clients_page.dart';
+import 'package:mrdb/home/navs/owner/admin_page.dart';
 import 'package:mrdb/home/navs/owner/telegram_videos_page.dart';
 import 'package:mrdb/services/app_update_service.dart';
 import 'package:mrdb/services/network_service.dart';
@@ -27,7 +26,7 @@ class _AboutState extends ConsumerState<About> {
   bool _isLoading = true;
   bool _isOwner = false;
   bool _isCheckingUpdate = false;
-  String _appVersion = '1.0.0';
+  String _appVersion = '2.0.0';
   List<String> _device = ['Unknown', 'Unknown Model', 'Unknown Version', 'Unknown ID'];
 
   static const Color _kBgColor = Color(0xFF0D0D14);
@@ -175,9 +174,7 @@ class _AboutState extends ConsumerState<About> {
                     _buildDetailsCard(),
                     if (_isOwner) ...[
                       const SizedBox(height: 16),
-                      _buildManageClientsButton(),
-                      const SizedBox(height: 12),
-                      _buildBotManagerButton(),
+                      _buildAdminButton(),
                       const SizedBox(height: 12),
                       _buildDeviceCompactCard(),
                     ],
@@ -627,8 +624,8 @@ class _AboutState extends ConsumerState<About> {
     );
   }
 
-  // ── Manage Clients Button (Owner Only) ───────────────────────────────────
-  Widget _buildManageClientsButton() {
+  // ── Admin Section Button (Owner Only) ────────────────────────────────────
+  Widget _buildAdminButton() {
     return InkWell(
       borderRadius: BorderRadius.circular(16),
       onTap: () {
@@ -636,7 +633,7 @@ class _AboutState extends ConsumerState<About> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => const ManageClientsPage(),
+            builder: (context) => const AdminPage(),
           ),
         );
       },
@@ -659,80 +656,14 @@ class _AboutState extends ConsumerState<About> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: _kAccent.withValues(alpha: 0.15),
+                color: Colors.amber.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.people_alt_rounded, color: _kAccent, size: 20),
-            ),
-            const SizedBox(width: 14),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        'Manage Clients',
-                        style: TextStyle(
-                          color: _kTextPrimary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      SizedBox(width: 6),
-                      Icon(Icons.admin_panel_settings_rounded, color: Colors.amber, size: 16),
-                    ],
-                  ),
-                  SizedBox(height: 2),
-                  Text(
-                    'View all registered devices & their liked movies',
-                    style: TextStyle(
-                      color: _kTextSecondary,
-                      fontSize: 11.5,
-                    ),
-                  ),
-                ],
+              child: const Icon(
+                Icons.admin_panel_settings_rounded,
+                color: Colors.amber,
+                size: 20,
               ),
-            ),
-            const Icon(
-              Icons.arrow_forward_ios_rounded,
-              color: _kAccent,
-              size: 14,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBotManagerButton() {
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: () {
-        HapticFeedback.lightImpact();
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const BotManagerPage(),
-          ),
-        );
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: _kCardBg,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _kAccent.withValues(alpha: 0.35)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: _kAccent.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.smart_toy_rounded, color: _kAccent, size: 20),
             ),
             const SizedBox(width: 14),
             const Expanded(
@@ -740,7 +671,7 @@ class _AboutState extends ConsumerState<About> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Bot Manager',
+                    'Admin',
                     style: TextStyle(
                       color: _kTextPrimary,
                       fontSize: 14,
@@ -749,7 +680,7 @@ class _AboutState extends ConsumerState<About> {
                   ),
                   SizedBox(height: 2),
                   Text(
-                    'Track bot users, ban/unban & send broadcasts',
+                    'Manage clients & FileToLink bot controls',
                     style: TextStyle(
                       color: _kTextSecondary,
                       fontSize: 11.5,

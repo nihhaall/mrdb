@@ -4,6 +4,17 @@ import 'package:flutter/services.dart';
 import 'package:mrdb/main.dart';
 import 'package:mrdb/services/telegram_stream_service.dart';
 
+class _BroadcastButtonDraft {
+  final TextEditingController labelController = TextEditingController();
+  final TextEditingController urlController = TextEditingController();
+  bool sameRowAsPrev = false;
+
+  void dispose() {
+    labelController.dispose();
+    urlController.dispose();
+  }
+}
+
 class BotManagerPage extends StatefulWidget {
   const BotManagerPage({super.key});
 
@@ -40,13 +51,19 @@ class _BotManagerPageState extends State<BotManagerPage>
 
   bool _sendingBroadcast = false;
   BotBroadcastResult? _lastBroadcast;
+  final List<_BroadcastButtonDraft> _buttonDrafts = [];
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _usersScrollController.addListener(_onUsersScroll);
+    _broadcastController.addListener(_onComposerChanged);
     _loadAll();
+  }
+
+  void _onComposerChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -55,7 +72,12 @@ class _BotManagerPageState extends State<BotManagerPage>
     _broadcastPollTimer?.cancel();
     _tabController.dispose();
     _searchController.dispose();
+    _broadcastController.removeListener(_onComposerChanged);
     _broadcastController.dispose();
+    for (final draft in _buttonDrafts) {
+      draft.dispose();
+    }
+    _buttonDrafts.clear();
     _usersScrollController.removeListener(_onUsersScroll);
     _usersScrollController.dispose();
     super.dispose();
@@ -202,12 +224,118 @@ class _BotManagerPageState extends State<BotManagerPage>
     }
   }
 
+  void _addBroadcastButtonDraft() {
+    if (_buttonDrafts.length >= 6) {
+      showScaffoldMsg(context, txt: 'Maximum 6 buttons allowed per broadcast');
+      return;
+    }
+    final draft = _BroadcastButtonDraft();
+    draft.labelController.addListener(_onComposerChanged);
+    draft.urlController.addListener(_onComposerChanged);
+    setState(() => _buttonDrafts.add(draft));
+  }
+
+  void _removeBroadcastButtonDraft(int index) {
+    if (index < 0 || index >= _buttonDrafts.length) return;
+    final removed = _buttonDrafts.removeAt(index);
+    removed.labelController.removeListener(_onComposerChanged);
+    removed.urlController.removeListener(_onComposerChanged);
+    removed.dispose();
+    if (_buttonDrafts.isNotEmpty) {
+      _buttonDrafts.first.sameRowAsPrev = false;
+    }
+    setState(() {});
+  }
+
+  void _moveBroadcastButtonDraft(int index, int delta) {
+    final target = index + delta;
+    if (index < 0 ||
+        index >= _buttonDrafts.length ||
+        target < 0 ||
+        target >= _buttonDrafts.length) {
+      return;
+    }
+    setState(() {
+      final item = _buttonDrafts.removeAt(index);
+      _buttonDrafts.insert(target, item);
+      if (_buttonDrafts.isNotEmpty) {
+        _buttonDrafts.first.sameRowAsPrev = false;
+      }
+    });
+  }
+
+  void _toggleButtonRowMode(int index) {
+    if (index <= 0 || index >= _buttonDrafts.length) return;
+    setState(() {
+      _buttonDrafts[index].sameRowAsPrev = !_buttonDrafts[index].sameRowAsPrev;
+    });
+  }
+
+  void _applyMarkdownStyle(String prefix, String suffix, String placeholder) {
+    final text = _broadcastController.text;
+    final sel = _broadcastController.selection;
+    final start = sel.isValid ? sel.start : text.length;
+    final end = sel.isValid ? sel.end : text.length;
+    final safeStart = start.clamp(0, text.length);
+    final safeEnd = end.clamp(safeStart, text.length);
+    final selected = text.substring(safeStart, safeEnd);
+    final inner = selected.isNotEmpty ? selected : placeholder;
+    final replacement = '$prefix$inner$suffix';
+    final updated = text.replaceRange(safeStart, safeEnd, replacement);
+    _broadcastController.value = TextEditingValue(
+      text: updated,
+      selection: selected.isNotEmpty
+          ? TextSelection.collapsed(offset: safeStart + replacement.length)
+          : TextSelection(
+              baseOffset: safeStart + prefix.length,
+              extentOffset: safeStart + prefix.length + placeholder.length,
+            ),
+    );
+  }
+
+  List<int> _computeButtonRowIndices() {
+    final rows = <int>[];
+    var currentRow = 0;
+    for (var i = 0; i < _buttonDrafts.length; i++) {
+      if (i > 0 && !_buttonDrafts[i].sameRowAsPrev) {
+        currentRow++;
+      }
+      rows.add(currentRow);
+    }
+    return rows;
+  }
+
   Future<void> _sendBroadcast() async {
     final text = _broadcastController.text.trim();
     if (text.isEmpty) {
       showScaffoldMsg(context, txt: 'Enter a broadcast message');
       return;
     }
+
+    final rowIndices = _computeButtonRowIndices();
+    final buttons = <BroadcastButton>[];
+    for (var i = 0; i < _buttonDrafts.length; i++) {
+      final draft = _buttonDrafts[i];
+      final label = draft.labelController.text.trim();
+      final url = draft.urlController.text.trim();
+      if (label.isEmpty && url.isEmpty) continue;
+      final lowUrl = url.toLowerCase();
+      final validUrl = lowUrl.startsWith('https://') ||
+          lowUrl.startsWith('http://') ||
+          lowUrl.startsWith('tg://');
+      if (label.isEmpty || !validUrl) {
+        showScaffoldMsg(
+          context,
+          txt: 'Each button needs a label and valid https://, http://, or tg:// URL',
+        );
+        return;
+      }
+      buttons.add(BroadcastButton(text: label, url: url, row: rowIndices[i]));
+    }
+
+    final btnSummary = buttons.isEmpty
+        ? ''
+        : ' with ${buttons.length} inline button${buttons.length == 1 ? '' : 's'}';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -225,7 +353,7 @@ class _BotManagerPageState extends State<BotManagerPage>
           ),
         ),
         content: Text(
-          'This will send your message to ${_stats?.totalUsers ?? 'all'} bot users.',
+          'This will send your message$btnSummary to ${_stats?.totalUsers ?? 'all'} bot users.',
           style: const TextStyle(color: _kTextSecondary, fontSize: 13.5),
         ),
         actions: [
@@ -259,7 +387,10 @@ class _BotManagerPageState extends State<BotManagerPage>
     FocusScope.of(context).unfocus();
     _broadcastPollTimer?.cancel();
     setState(() => _sendingBroadcast = true);
-    final result = await TelegramStreamService.instance.sendBotBroadcast(text);
+    final result = await TelegramStreamService.instance.sendBotBroadcast(
+      text,
+      buttons: buttons,
+    );
     if (!mounted) return;
     setState(() {
       _sendingBroadcast = false;
@@ -267,6 +398,10 @@ class _BotManagerPageState extends State<BotManagerPage>
     });
     if (result.ok) {
       _broadcastController.clear();
+      for (final draft in _buttonDrafts) {
+        draft.dispose();
+      }
+      setState(() => _buttonDrafts.clear());
       if (!result.done && result.jobId != null && result.baseUrl != null) {
         showScaffoldMsg(
           context,
@@ -592,7 +727,238 @@ class _BotManagerPageState extends State<BotManagerPage>
     );
   }
 
+  Widget _buildMarkdownToolChip({
+    required String label,
+    required String tooltip,
+    required VoidCallback onTap,
+    TextStyle? labelStyle,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: _kInputBg,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: _kCardBorder),
+          ),
+          child: Text(
+            label,
+            style: labelStyle ??
+                const TextStyle(
+                  color: _kTextPrimary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<InlineSpan> _buildTelegramMarkdownSpans(String input) {
+    final baseStyle = const TextStyle(
+      color: _kTextPrimary,
+      fontSize: 13.5,
+      height: 1.4,
+    );
+    if (input.isEmpty) {
+      return [
+        TextSpan(
+          text: 'Your formatted announcement preview appears here...',
+          style: baseStyle.copyWith(color: _kTextSecondary),
+        ),
+      ];
+    }
+
+    final tokenRegex = RegExp(
+      r'(\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|\|\|[^|\n]+\|\||`[^`\n]+`|\[[^\]]+\]\([^)\s]+\))',
+    );
+    final spans = <InlineSpan>[];
+    var cursor = 0;
+
+    for (final m in tokenRegex.allMatches(input)) {
+      if (m.start > cursor) {
+        spans.add(TextSpan(text: input.substring(cursor, m.start), style: baseStyle));
+      }
+      final tok = m.group(0)!;
+      if (tok.startsWith('**') && tok.endsWith('**')) {
+        spans.add(TextSpan(
+          text: tok.substring(2, tok.length - 2),
+          style: baseStyle.copyWith(fontWeight: FontWeight.w800),
+        ));
+      } else if (tok.startsWith('__') && tok.endsWith('__')) {
+        spans.add(TextSpan(
+          text: tok.substring(2, tok.length - 2),
+          style: baseStyle.copyWith(fontStyle: FontStyle.italic),
+        ));
+      } else if (tok.startsWith('~~') && tok.endsWith('~~')) {
+        spans.add(TextSpan(
+          text: tok.substring(2, tok.length - 2),
+          style: baseStyle.copyWith(decoration: TextDecoration.lineThrough),
+        ));
+      } else if (tok.startsWith('||') && tok.endsWith('||')) {
+        spans.add(TextSpan(
+          text: tok.substring(2, tok.length - 2),
+          style: baseStyle.copyWith(
+            backgroundColor: Colors.white.withValues(alpha: 0.16),
+            color: _kTextPrimary.withValues(alpha: 0.78),
+          ),
+        ));
+      } else if (tok.startsWith('`') && tok.endsWith('`')) {
+        spans.add(TextSpan(
+          text: tok.substring(1, tok.length - 1),
+          style: baseStyle.copyWith(
+            fontFamily: 'monospace',
+            fontSize: 12.5,
+            color: _kAccent,
+            backgroundColor: Colors.black.withValues(alpha: 0.35),
+          ),
+        ));
+      } else if (tok.startsWith('[')) {
+        final closeBracket = tok.indexOf('](');
+        final label = closeBracket > 1 ? tok.substring(1, closeBracket) : tok;
+        spans.add(TextSpan(
+          text: label,
+          style: baseStyle.copyWith(
+            color: const Color(0xFF4FC3F7),
+            decoration: TextDecoration.underline,
+            decorationColor: const Color(0xFF4FC3F7),
+          ),
+        ));
+      }
+      cursor = m.end;
+    }
+
+    if (cursor < input.length) {
+      spans.add(TextSpan(text: input.substring(cursor), style: baseStyle));
+    }
+    return spans;
+  }
+
+  Widget _buildBroadcastLivePreview(List<int> rowIndices) {
+    final grouped = <int, List<_BroadcastButtonDraft>>{};
+    for (var i = 0; i < _buttonDrafts.length; i++) {
+      final label = _buttonDrafts[i].labelController.text.trim();
+      final url = _buttonDrafts[i].urlController.text.trim();
+      if (label.isEmpty && url.isEmpty) continue;
+      grouped.putIfAbsent(rowIndices[i], () => []).add(_buttonDrafts[i]);
+    }
+    final sortedKeys = grouped.keys.toList()..sort();
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _kCardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _kCardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.visibility_rounded, color: _kAccent, size: 16),
+              const SizedBox(width: 6),
+              const Text(
+                'Live Preview',
+                style: TextStyle(
+                  color: _kTextPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '@FileToSpeedLink_Bot',
+                style: TextStyle(
+                  color: _kTextSecondary.withValues(alpha: 0.8),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF152033),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFF25354E)),
+            ),
+            child: RichText(
+              text: TextSpan(
+                children: _buildTelegramMarkdownSpans(
+                  _broadcastController.text.trim(),
+                ),
+              ),
+            ),
+          ),
+          if (sortedKeys.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            for (final rk in sortedKeys) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  for (var j = 0; j < grouped[rk]!.length; j++) ...[
+                    if (j > 0) const SizedBox(width: 6),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 9,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E2B42),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: const Color(0xFF2D4163),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                grouped[rk]![j].labelController.text.trim().isEmpty
+                                    ? 'Button'
+                                    : grouped[rk]![j].labelController.text.trim(),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: _kTextPrimary,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.open_in_new_rounded,
+                              size: 12,
+                              color: _kTextSecondary,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildBroadcastTab() {
+    final rowIndices = _computeButtonRowIndices();
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -618,10 +984,74 @@ class _BotManagerPageState extends State<BotManagerPage>
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Sends a Telegram message from @FileToSpeedLink_Bot to every registered bot user.',
+                  'Supports Markdown (**bold**, __italic__, `code`, ~~strike~~, ||spoiler||, [link](url)).',
                   style: TextStyle(color: _kTextSecondary, fontSize: 12),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    _buildMarkdownToolChip(
+                      label: 'B',
+                      tooltip: 'Bold (**text**)',
+                      labelStyle: const TextStyle(
+                        color: _kTextPrimary,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w900,
+                      ),
+                      onTap: () => _applyMarkdownStyle('**', '**', 'bold'),
+                    ),
+                    _buildMarkdownToolChip(
+                      label: 'I',
+                      tooltip: 'Italic (__text__)',
+                      labelStyle: const TextStyle(
+                        color: _kTextPrimary,
+                        fontSize: 12.5,
+                        fontStyle: FontStyle.italic,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      onTap: () => _applyMarkdownStyle('__', '__', 'italic'),
+                    ),
+                    _buildMarkdownToolChip(
+                      label: '</>',
+                      tooltip: 'Monospace (`code`)',
+                      labelStyle: const TextStyle(
+                        color: _kAccent,
+                        fontSize: 11.5,
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w700,
+                      ),
+                      onTap: () => _applyMarkdownStyle('`', '`', 'code'),
+                    ),
+                    _buildMarkdownToolChip(
+                      label: 'S',
+                      tooltip: 'Strikethrough (~~text~~)',
+                      labelStyle: const TextStyle(
+                        color: _kTextPrimary,
+                        fontSize: 12,
+                        decoration: TextDecoration.lineThrough,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      onTap: () => _applyMarkdownStyle('~~', '~~', 'strike'),
+                    ),
+                    _buildMarkdownToolChip(
+                      label: '||Spoiler||',
+                      tooltip: 'Spoiler (||text||)',
+                      onTap: () => _applyMarkdownStyle('||', '||', 'spoiler'),
+                    ),
+                    _buildMarkdownToolChip(
+                      label: 'Link',
+                      tooltip: 'Link ([label](url))',
+                      onTap: () => _applyMarkdownStyle(
+                        '[',
+                        '](https://example.com)',
+                        'Click Here',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
@@ -646,6 +1076,195 @@ class _BotManagerPageState extends State<BotManagerPage>
                     ),
                   ),
                 ),
+                const SizedBox(height: 14),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Inline Buttons (Optional)',
+                      style: TextStyle(
+                        color: _kTextPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: _sendingBroadcast
+                          ? null
+                          : _addBroadcastButtonDraft,
+                      style: TextButton.styleFrom(
+                        foregroundColor: _kAccent,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                      ),
+                      icon: const Icon(Icons.add_link_rounded, size: 17),
+                      label: const Text(
+                        'Add Button',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                for (var i = 0; i < _buttonDrafts.length; i++) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: _kInputBg,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: _kCardBorder),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _kAccent.withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                'Row ${rowIndices[i] + 1}',
+                                style: const TextStyle(
+                                  color: _kAccent,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                            if (i > 0) ...[
+                              const SizedBox(width: 6),
+                              InkWell(
+                                borderRadius: BorderRadius.circular(6),
+                                onTap: () => _toggleButtonRowMode(i),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _buttonDrafts[i].sameRowAsPrev
+                                        ? const Color(0xFF25354E)
+                                        : _kCardBg,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: _kCardBorder),
+                                  ),
+                                  child: Text(
+                                    _buttonDrafts[i].sameRowAsPrev
+                                        ? 'Same Row'
+                                        : 'New Row',
+                                    style: const TextStyle(
+                                      color: _kTextPrimary,
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                            const Spacer(),
+                            IconButton(
+                              tooltip: 'Move up',
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: i > 0
+                                  ? () => _moveBroadcastButtonDraft(i, -1)
+                                  : null,
+                              icon: Icon(
+                                Icons.arrow_upward_rounded,
+                                color: i > 0
+                                    ? _kTextSecondary
+                                    : _kTextSecondary.withValues(alpha: 0.25),
+                                size: 17,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            IconButton(
+                              tooltip: 'Move down',
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: i < _buttonDrafts.length - 1
+                                  ? () => _moveBroadcastButtonDraft(i, 1)
+                                  : null,
+                              icon: Icon(
+                                Icons.arrow_downward_rounded,
+                                color: i < _buttonDrafts.length - 1
+                                    ? _kTextSecondary
+                                    : _kTextSecondary.withValues(alpha: 0.25),
+                                size: 17,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            IconButton(
+                              tooltip: 'Remove button',
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () => _removeBroadcastButtonDraft(i),
+                              icon: const Icon(
+                                Icons.close_rounded,
+                                color: _kTextSecondary,
+                                size: 18,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Divider(
+                          height: 12,
+                          color: _kCardBorder.withValues(alpha: 0.7),
+                        ),
+                        TextField(
+                          controller: _buttonDrafts[i].labelController,
+                          style: const TextStyle(
+                            color: _kTextPrimary,
+                            fontSize: 13,
+                          ),
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            hintText: 'Button label (e.g. Watch Now)',
+                            hintStyle: TextStyle(
+                              color: _kTextSecondary,
+                              fontSize: 12.5,
+                            ),
+                            border: InputBorder.none,
+                          ),
+                        ),
+                        Divider(
+                          height: 10,
+                          color: _kCardBorder.withValues(alpha: 0.7),
+                        ),
+                        TextField(
+                          controller: _buttonDrafts[i].urlController,
+                          keyboardType: TextInputType.url,
+                          style: const TextStyle(
+                            color: _kAccent,
+                            fontSize: 12.5,
+                          ),
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            hintText: 'https://example.com',
+                            hintStyle: TextStyle(
+                              color: _kTextSecondary,
+                              fontSize: 12.5,
+                            ),
+                            border: InputBorder.none,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 14),
                 SizedBox(
                   width: double.infinity,
@@ -682,6 +1301,8 @@ class _BotManagerPageState extends State<BotManagerPage>
               ],
             ),
           ),
+          const SizedBox(height: 14),
+          _buildBroadcastLivePreview(rowIndices),
           if (_lastBroadcast != null && _lastBroadcast!.ok) ...[
             const SizedBox(height: 14),
             Container(

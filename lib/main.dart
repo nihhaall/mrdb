@@ -331,7 +331,7 @@ class MRDb extends StatelessWidget {
         },
         home: MrdbSplashScreen(
           nextScreen: const MainScreen(),
-          minDisplayDuration: const Duration(milliseconds: 3200),
+          minDisplayDuration: const Duration(milliseconds: 2100),
           onInit: () => initializeApp(context),
         ),
       ),

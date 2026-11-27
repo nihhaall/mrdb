@@ -332,6 +332,9 @@ class AppUpdateService extends ChangeNotifier {
   /// [availableUpdate] populated so the About page can surface it.
   Future<AppUpdateInfo?> checkForUpdate({bool forceCheck = false}) async {
     if (!_isAndroid) return null;
+    if (NetworkService.instance.isPlayerExclusiveActive) {
+      return _state.info;
+    }
     if (_state.isDownloadingOrVerifying) return _state.info;
     if (!forceCheck && _checkedThisSession) return _state.info;
 
@@ -818,6 +821,14 @@ class AppUpdateService extends ChangeNotifier {
       await _bridge.openInstallPermissionSettings();
     } catch (e) {
       debugPrint('openPermissionSettings error: $e');
+    }
+  }
+
+  /// Stops an active background APK download while the video player is open so
+  /// all device bandwidth stays available for playback.
+  void pauseBackgroundWorkForPlayback() {
+    if (_state.phase == AppUpdatePhase.downloading) {
+      unawaited(cancelDownload());
     }
   }
 

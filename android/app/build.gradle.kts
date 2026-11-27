@@ -40,6 +40,12 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            if (project.findProperty("split-per-abi")?.toString() != "true") {
+                ndk {
+                    // Skip x86_64 emulator native libs in universal release APKs (~36 MB saved).
+                    abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+                }
+            }
         }
     }
 }

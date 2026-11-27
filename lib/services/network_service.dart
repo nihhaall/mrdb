@@ -189,10 +189,22 @@ class AppHttpOverrides extends HttpOverrides {
 
   @override
   HttpClient createHttpClient(SecurityContext? context) {
+    final isPlayerStreamClient =
+        Zone.current[NetworkService.playerStreamZoneKey] == true;
     final client = super.createHttpClient(context);
     client.connectionTimeout = const Duration(seconds: 8);
     client.idleTimeout = const Duration(seconds: 15);
     client.connectionFactory = (Uri uri, String? proxyHost, int? proxyPort) async {
+      final lowerHost = uri.host.toLowerCase();
+      final isLoopback = lowerHost == '127.0.0.1' ||
+          lowerHost == 'localhost' ||
+          lowerHost == '::1';
+      if (!isPlayerStreamClient &&
+          !isLoopback &&
+          NetworkService.instance.isPlayerExclusiveActive) {
+        await NetworkService.instance.waitUntilPlayerExits();
+      }
+
       if (proxyHost != null) {
         return Socket.startConnect(proxyHost, proxyPort ?? uri.port);
       }
@@ -331,20 +343,59 @@ class NetworkService {
   NetworkService._();
   static final NetworkService instance = NetworkService._();
 
+  static const Object playerStreamZoneKey = #mrdbPlayerStream;
+
   static const String _primaryTmdbHost = 'api.themoviedb.org';
   static const String _fallbackTmdbHost = 'api.tmdb.org';
 
   String _preferredTmdbHost = _primaryTmdbHost;
   http.Client? _sharedClient;
+  int _playerExclusiveDepth = 0;
+  Completer<void>? _exclusiveReleaseCompleter;
 
   bool? _cachedOnline;
   DateTime? _cachedOnlineAt;
+
+  bool get isPlayerExclusiveActive => _playerExclusiveDepth > 0;
+
+  void enterPlayerExclusiveMode() {
+    _playerExclusiveDepth++;
+    if (_playerExclusiveDepth == 1) {
+      _exclusiveReleaseCompleter = Completer<void>();
+    }
+  }
+
+  void exitPlayerExclusiveMode() {
+    if (_playerExclusiveDepth <= 0) {
+      _playerExclusiveDepth = 0;
+      return;
+    }
+    _playerExclusiveDepth--;
+    if (_playerExclusiveDepth == 0) {
+      final completer = _exclusiveReleaseCompleter;
+      _exclusiveReleaseCompleter = null;
+      if (completer != null && !completer.isCompleted) {
+        completer.complete();
+      }
+    }
+  }
+
+  Future<void> waitUntilPlayerExits() {
+    final c = _exclusiveReleaseCompleter;
+    if (!isPlayerExclusiveActive || c == null || c.isCompleted) {
+      return Future.value();
+    }
+    return c.future;
+  }
 
   http.Client get client => _sharedClient ??= IOClient(HttpClient());
 
   /// Fast, real connectivity probe (works accurately on Wi-Fi, mobile data,
   /// captive portals, and offline Airplane mode without extra native plugins).
   Future<bool> hasInternet({bool forceRefresh = false}) async {
+    if (isPlayerExclusiveActive) {
+      return _cachedOnline ?? true;
+    }
     if (!forceRefresh &&
         _cachedOnline != null &&
         _cachedOnlineAt != null &&

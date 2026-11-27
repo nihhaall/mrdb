@@ -17,6 +17,7 @@ import 'package:mrdb/services/release_notification_service.dart';
 import 'package:mrdb/services/telegram_stream_service.dart';
 import 'package:mrdb/widgets/image_gallery_viewer.dart';
 import 'package:mrdb/widgets/mkv_stream_player_page.dart';
+import 'package:mrdb/widgets/movie_collection_sheets.dart';
 import 'package:mrdb/widgets/movie_share_card.dart';
 import 'package:mrdb/widgets/network_status_widgets.dart';
 import 'package:path_provider/path_provider.dart';
@@ -91,7 +92,10 @@ class _MoviePreviewState extends State<MoviePreview>
   String? _songsError;
   bool _songsLoadedOnce = false;
   List<TelegramVideoItem> _matchedBotVideos = [];
+  Map<String, VideoWatchProgress> _botWatchProgress = {};
+  Map<String, String> _botLastFrames = {};
   bool _botVideosLoadedOnce = false;
+  bool _isOwner = false;
   Map videos = {};
   List videoList = [];
   List reviews = [];
@@ -167,10 +171,15 @@ class _MoviePreviewState extends State<MoviePreview>
     getMovieDetails();
     _checkRatingStatus();
     getVideo();
+    _fetchMatchingBotVideos();
     SharedPreferences.getInstance().then((prefs) {
       final list = prefs.getStringList('movie_reminders') ?? [];
-      if (list.contains(widget.movieId.toString()) && mounted) {
-        setState(() => _isReminded = true);
+      final isOwner = prefs.getBool('is_owner') ?? false;
+      if (mounted) {
+        setState(() {
+          _isReminded = list.contains(widget.movieId.toString());
+          _isOwner = isOwner;
+        });
       }
     });
   }
@@ -1269,21 +1278,78 @@ class _MoviePreviewState extends State<MoviePreview>
     }
   }
 
-  Future<void> _fetchMatchingBotVideos() async {
+  Future<void> _fetchMatchingBotVideos({bool force = false}) async {
     final tmdbId = int.tryParse(widget.movieId.toString());
     if (tmdbId == null) return;
+    if (_botVideosLoadedOnce && !force) return;
     _botVideosLoadedOnce = true;
     try {
-      final result = await TelegramStreamService.instance.fetchBotVideos(
-        tmdbId: tmdbId,
-        limit: 10,
-      );
-      if (mounted && result.videos.isNotEmpty) {
+      final results = await Future.wait([
+        TelegramStreamService.instance.fetchBotVideos(
+          tmdbId: tmdbId,
+          limit: 20,
+          includeHidden: _isOwner,
+        ),
+        TelegramStreamService.instance.getAllWatchProgress(),
+        TelegramStreamService.instance.getAllLastFrames(),
+      ]);
+      final result = results[0] as TelegramVideosResult;
+      final progress = results[1] as Map<String, VideoWatchProgress>;
+      final lastFrames = results[2] as Map<String, String>;
+      if (mounted && result.errorMessage == null) {
         setState(() {
           _matchedBotVideos = result.videos;
+          _botWatchProgress = progress;
+          _botLastFrames = lastFrames;
         });
       }
     } catch (_) {}
+  }
+
+  Future<void> _openLinkFilesSheet() async {
+    if (!_isOwner) return;
+    final tmdbId = int.tryParse(widget.movieId.toString());
+    if (tmdbId == null) return;
+    HapticFeedback.lightImpact();
+    final movieTitle =
+        (movi['title'] ?? movi['name'] ?? widget.title ?? 'Movie').toString();
+    final poster = (movi['poster_path'] ?? widget.posterPath)?.toString();
+    final releaseDate = (movi['release_date'] ?? '').toString();
+    final releaseYear =
+        releaseDate.length >= 4 ? releaseDate.substring(0, 4) : null;
+
+    final changed = await showLinkStreamFilesSheet(
+      context,
+      tmdbId: tmdbId,
+      movieTitle: movieTitle,
+      moviePoster: poster,
+      movieYear: releaseYear,
+      initialLinked: _matchedBotVideos,
+    );
+    if (changed == true && mounted) {
+      await _fetchMatchingBotVideos(force: true);
+    }
+  }
+
+  Future<void> _editLinkedBotVideo(TelegramVideoItem item) async {
+    if (!_isOwner) return;
+    HapticFeedback.lightImpact();
+    final updated = await showEditMovieMetadataSheet(context, item: item);
+    if (updated != null && mounted) {
+      await _fetchMatchingBotVideos(force: true);
+    }
+  }
+
+  Future<void> _unlinkLinkedBotVideo(TelegramVideoItem item) async {
+    if (!_isOwner) return;
+    HapticFeedback.lightImpact();
+    final res = await TelegramStreamService.instance.updateBotVideoMetadata(
+      item,
+      clearTmdb: true,
+    );
+    if (res != null && mounted) {
+      await _fetchMatchingBotVideos(force: true);
+    }
   }
 
   String _decodeHtmlEntities(String input) {
@@ -4191,8 +4257,210 @@ class _MoviePreviewState extends State<MoviePreview>
     );
   }
 
+  String? _resolveFallbackTmdbThumb() {
+    final backdrop =
+        (movi['backdrop_path'] ?? widget.backdropPath)?.toString().trim() ?? '';
+    if (backdrop.isNotEmpty && backdrop != 'null') {
+      return '${AppConstants.baseImageUrl}$backdrop';
+    }
+    final poster =
+        (movi['poster_path'] ?? widget.posterPath)?.toString().trim() ?? '';
+    if (poster.isNotEmpty && poster != 'null') {
+      return '${AppConstants.baseImageUrl}$poster';
+    }
+    return null;
+  }
+
+  Future<void> _openLinkedBotVideo(
+    TelegramVideoItem item, {
+    Duration? startAt,
+    String? localThumbPath,
+  }) async {
+    HapticFeedback.lightImpact();
+    if (_isPlayingInlineTrailer) {
+      _sliverYtController?.pause();
+    }
+    final fallbackThumb = _resolveFallbackTmdbThumb();
+    final playerThumbUrl =
+        (item.thumbUrl != null && item.thumbUrl!.trim().isNotEmpty)
+            ? item.thumbUrl
+            : fallbackThumb;
+    final key = TelegramStreamService.progressKeyFor(item);
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MkvStreamPlayerPage(
+          title: item.metadataEdited ? item.title : item.fileName,
+          streamUrl: item.streamUrl,
+          fallbackWebUrl: item.watchUrl,
+          formatLabel: item.formatBadge,
+          progressKey: key,
+          initialPosition: startAt,
+          thumbnailUrl: playerThumbUrl,
+          thumbnailPath: localThumbPath,
+          disabledAudioIndices: item.disabledAudioIndices,
+        ),
+      ),
+    );
+    await _fetchMatchingBotVideos(force: true);
+  }
+
+  Widget _buildQuickStreamThumb(
+    TelegramVideoItem item, {
+    String? localFramePath,
+    double? progressFraction,
+  }) {
+    final fallbackUrl = _resolveFallbackTmdbThumb();
+    final networkUrl =
+        (item.thumbUrl != null && item.thumbUrl!.trim().isNotEmpty)
+            ? item.thumbUrl!
+            : fallbackUrl;
+    Widget imageChild;
+    if (localFramePath != null && File(localFramePath).existsSync()) {
+      imageChild = Image.file(File(localFramePath), fit: BoxFit.cover);
+    } else if (networkUrl != null && networkUrl.isNotEmpty) {
+      imageChild = CachedNetworkImage(
+        imageUrl: networkUrl,
+        fit: BoxFit.cover,
+        errorWidget: (_, _, _) => fallbackUrl != null && fallbackUrl != networkUrl
+            ? CachedNetworkImage(
+                imageUrl: fallbackUrl,
+                fit: BoxFit.cover,
+                errorWidget: (_, _, _) => Container(color: const Color(0xFF1A2034)),
+              )
+            : Container(color: const Color(0xFF1A2034)),
+      );
+    } else {
+      imageChild = Container(
+        color: const Color(0xFF1A2034),
+        child: const Icon(
+          Icons.movie_rounded,
+          color: Colors.white24,
+          size: 26,
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: 112,
+        height: 68,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            imageChild,
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.12),
+                      Colors.black.withValues(alpha: 0.62),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Center(
+              child: Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.58),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: const Color(0xFF00E5A0).withValues(alpha: 0.9),
+                    width: 1.3,
+                  ),
+                ),
+                child: const Icon(
+                  Icons.play_arrow_rounded,
+                  color: Color(0xFF00E5A0),
+                  size: 19,
+                ),
+              ),
+            ),
+            Positioned(
+              top: 5,
+              left: 5,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.72),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  item.formatBadge,
+                  style: const TextStyle(
+                    color: Color(0xFF00E5A0),
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+            ),
+            if (progressFraction != null && progressFraction > 0)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: LinearProgressIndicator(
+                  value: progressFraction,
+                  minHeight: 3,
+                  backgroundColor: Colors.white24,
+                  valueColor: const AlwaysStoppedAnimation<Color>(
+                    Color(0xFF00E5A0),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickMetaBadge(
+    String text, {
+    Color textColor = Colors.white70,
+    Color? bgColor,
+    IconData? icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: bgColor ?? Colors.white.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 11, color: textColor),
+            const SizedBox(width: 4),
+          ],
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: textColor,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBotStreamSection() {
-    if (_matchedBotVideos.isEmpty) {
+    if (_matchedBotVideos.isEmpty && !_isOwner) {
       return const SizedBox.shrink();
     }
     return Padding(
@@ -4202,84 +4470,89 @@ class _MoviePreviewState extends State<MoviePreview>
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: _buildSectionHeading(
-              'Cloud Video Stream',
-              count: _matchedBotVideos.length,
+            child: Row(
+              children: [
+                Expanded(
+                  child: _buildSectionHeading(
+                    'Quick Stream',
+                    count: _matchedBotVideos.length,
+                  ),
+                ),
+                if (_isOwner)
+                  InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: _openLinkFilesSheet,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00E5A0).withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: const Color(0xFF00E5A0).withValues(alpha: 0.4),
+                        ),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.playlist_add_rounded,
+                            color: Color(0xFF00E5A0),
+                            size: 16,
+                          ),
+                          SizedBox(width: 5),
+                          Text(
+                            'Add File',
+                            style: TextStyle(
+                              color: Color(0xFF00E5A0),
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
           const SizedBox(height: 12),
-          for (final item in _matchedBotVideos)
+          if (_matchedBotVideos.isEmpty && _isOwner)
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
+              padding: const EdgeInsets.symmetric(horizontal: 18),
               child: InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  if (_isPlayingInlineTrailer) {
-                    _sliverYtController?.pause();
-                  }
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => MkvStreamPlayerPage(
-                        title: item.title,
-                        streamUrl: item.streamUrl,
-                        fallbackWebUrl: item.watchUrl,
-                        formatLabel: item.formatBadge,
-                      ),
-                    ),
-                  );
-                },
+                borderRadius: BorderRadius.circular(16),
+                onTap: _openLinkFilesSheet,
                 child: Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: const Color(0xFF141825),
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: const Color(0xFF00E5A0).withValues(alpha: 0.3),
+                      color: const Color(0xFF00E5A0).withValues(alpha: 0.28),
                     ),
                   ),
-                  child: Row(
+                  child: const Row(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF00E5A0).withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(
-                          Icons.play_arrow_rounded,
-                          color: Color(0xFF00E5A0),
-                          size: 24,
-                        ),
+                      Icon(
+                        Icons.library_add_rounded,
+                        color: Color(0xFF00E5A0),
+                        size: 20,
                       ),
-                      const SizedBox(width: 12),
+                      SizedBox(width: 11),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              item.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              '${item.formatBadge}${item.fileSize > 0 ? ' • ${TelegramStreamService.formatBytes(item.fileSize)}' : ''}',
-                              style: const TextStyle(
-                                color: Colors.white60,
-                                fontSize: 11.5,
-                              ),
-                            ),
-                          ],
+                        child: Text(
+                          'Save uploaded movie files to this movie collection',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
-                      const Icon(
+                      Icon(
                         Icons.chevron_right_rounded,
                         color: Color(0xFF00E5A0),
                       ),
@@ -4287,6 +4560,188 @@ class _MoviePreviewState extends State<MoviePreview>
                   ),
                 ),
               ),
+            ),
+          for (final item in _matchedBotVideos)
+            Builder(
+              builder: (_) {
+                final key = TelegramStreamService.progressKeyFor(item);
+                final progress = _botWatchProgress[key];
+                final canResume = progress != null && progress.canResume;
+                final lastFrame = _botLastFrames[key];
+                final displayName = item.metadataEdited
+                    ? item.title
+                    : TelegramStreamService.cleanSearchTitle(item.fileName);
+                final enabledTracksCount = item.audioTracks.isNotEmpty
+                    ? item.audioTracks
+                        .where((t) => !item.disabledAudioIndices.contains(t.index))
+                        .length
+                    : 0;
+
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0xFF151B2B), Color(0xFF101420)],
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: canResume
+                            ? const Color(0xFF00E5A0).withValues(alpha: 0.45)
+                            : Colors.white.withValues(alpha: 0.1),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.28),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: () => _openLinkedBotVideo(
+                          item,
+                          startAt: canResume
+                              ? Duration(milliseconds: progress.positionMs)
+                              : null,
+                          localThumbPath: lastFrame,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(10),
+                          child: Row(
+                            children: [
+                              _buildQuickStreamThumb(
+                                item,
+                                localFramePath: lastFrame,
+                                progressFraction: canResume
+                                    ? (progress.fraction > 0
+                                        ? progress.fraction
+                                        : 0.12)
+                                    : null,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      displayName.isNotEmpty
+                                          ? displayName
+                                          : item.fileName,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w700,
+                                        height: 1.2,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Wrap(
+                                      spacing: 5,
+                                      runSpacing: 4,
+                                      children: [
+                                        if (canResume)
+                                          _buildQuickMetaBadge(
+                                            'Resume',
+                                            icon: Icons.history_rounded,
+                                            textColor: const Color(0xFF00E5A0),
+                                            bgColor: const Color(0xFF00E5A0)
+                                                .withValues(alpha: 0.14),
+                                          ),
+                                        if (item.language != null &&
+                                            item.language!.trim().isNotEmpty)
+                                          _buildQuickMetaBadge(
+                                            item.language!.trim(),
+                                            textColor: const Color(0xFF00B0FF),
+                                            bgColor: const Color(0xFF00B0FF)
+                                                .withValues(alpha: 0.12),
+                                          )
+                                        else if (enabledTracksCount > 1)
+                                          _buildQuickMetaBadge(
+                                            '$enabledTracksCount Audio',
+                                            icon: Icons.audiotrack_rounded,
+                                            textColor: const Color(0xFF00B0FF),
+                                            bgColor: const Color(0xFF00B0FF)
+                                                .withValues(alpha: 0.12),
+                                          ),
+                                        if (item.fileSize > 0)
+                                          _buildQuickMetaBadge(
+                                            TelegramStreamService.formatBytes(
+                                              item.fileSize,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              if (_isOwner)
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      tooltip: 'Edit Metadata & Audio',
+                                      constraints: const BoxConstraints(
+                                        minWidth: 32,
+                                        minHeight: 32,
+                                      ),
+                                      padding: EdgeInsets.zero,
+                                      onPressed: () =>
+                                          _editLinkedBotVideo(item),
+                                      icon: const Icon(
+                                        Icons.tune_rounded,
+                                        color: Color(0xFF00E5A0),
+                                        size: 18,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Remove from Collection',
+                                      constraints: const BoxConstraints(
+                                        minWidth: 32,
+                                        minHeight: 32,
+                                      ),
+                                      padding: EdgeInsets.zero,
+                                      onPressed: () =>
+                                          _unlinkLinkedBotVideo(item),
+                                      icon: const Icon(
+                                        Icons.link_off_rounded,
+                                        color: Color(0xFFFF6B6B),
+                                        size: 18,
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              else
+                                Container(
+                                  width: 34,
+                                  height: 34,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF00E5A0)
+                                        .withValues(alpha: 0.16),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.play_arrow_rounded,
+                                    color: Color(0xFF00E5A0),
+                                    size: 20,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
         ],
       ),
